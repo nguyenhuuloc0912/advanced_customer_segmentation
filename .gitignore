@@ -19,6 +19,9 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+# macOS
+.DS_Store
+
 
 # Jupyter Notebook
 .ipynb_checkpoints
