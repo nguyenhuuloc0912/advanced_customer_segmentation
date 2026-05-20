@@ -60,6 +60,8 @@ streamlit run app.py
 - **Scikit-learn** - Machine learning
 - **Matplotlib/Seaborn** - Visualization
 - **NumPy** - Tính toán số học
+- **SHAP** - Giải thích mô hình
+- **Streamlit** - Tạo giao diện tương tác
 
 ## Tài liệu
 
