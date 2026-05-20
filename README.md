@@ -47,7 +47,12 @@ pip install -r requirements.txt
    - `01_cleaning_and_eda.ipynb` - Làm sạch và khám phá dữ liệu
    - `02_feature_engineering.ipynb` - Tạo features RFM
    - `03_modeling.ipynb` - Xây dựng mô hình clustering
+  
+3. **Chạy streamlit hiển thị giao diện:**
 
+```bash
+streamlit run app.py
+```
 ## Công nghệ sử dụng
 
 - **Python**
