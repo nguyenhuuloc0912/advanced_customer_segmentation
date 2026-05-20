@@ -13,7 +13,7 @@ Phân tích dữ liệu giao dịch của khách hàng để:
 ## Dữ liệu
 
 - **Nguồn**: Dữ liệu giao dịch công ty bán lẻ trực tuyến UK (2010-2011)
-- **Quy mô**: 541,909 giao dịch từ 4,372 khách hàng
+- **Quy mô**: 541,909 giao dịch từ 4,373 khách hàng
 - **Đặc điểm**: Giao dịch quà tặng và đồ gia dụng độc đáo
 
 ## Cấu trúc dự án
