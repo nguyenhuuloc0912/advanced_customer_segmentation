@@ -30,7 +30,9 @@ Phân tích dữ liệu giao dịch của khách hàng để:
 │   └── clustering_library.py         # Thư viện chính
 ├── docs/
 │   └── project_description.md        # Mô tả chi tiết dự án
+├── app.py                            # Giao diện hiển thị bằng Streamlit
 └── requirements.txt                  # Dependencies
+
 ```
 
 ## Bắt đầu nhanh
