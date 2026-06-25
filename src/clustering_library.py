@@ -1,42 +1,56 @@
 # -*- coding: utf-8 -*-
 """
-Customer Segmentation Library
+Thư viện phân khúc khách hàng (Customer Segmentation Library).
 
-This library contains classes for data cleaning, feature engineering, and clustering
-analysis for customer segmentation.
+File này gom các class phục vụ toàn bộ quy trình phân khúc khách hàng:
+1. DataCleaner: đọc dữ liệu, làm sạch dữ liệu giao dịch và tính RFM cơ bản.
+2. FeatureEngineer: tạo đặc trưng ở cấp độ khách hàng từ dữ liệu giao dịch.
+3. ClusterAnalyzer: PCA, chọn số cụm, K-Means, radar chart và giải thích bằng SHAP.
+4. DataVisualizer: vẽ các biểu đồ EDA phục vụ phân tích hành vi khách hàng.
+
+Lưu ý: các comment tiếng Việt được thêm để giúp dễ đọc code, không thay đổi logic xử lý.
 """
 
+# Import các thư viện xử lý thời gian, đường dẫn file và thư mục
 import datetime as dt
 import os
 
+# Import các thư viện phân tích dữ liệu, trực quan hóa và giải thích mô hình
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import shap
+# Import các công cụ thống kê, đặc biệt Box-Cox để biến đổi phân phối dữ liệu
 from scipy import stats
 from scipy.stats import boxcox
+# Import các thuật toán và thước đo từ scikit-learn phục vụ PCA, clustering và đánh giá mô hình
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, silhouette_samples, silhouette_score
 from sklearn.preprocessing import StandardScaler
-
+from sklearn.model_selection import train_test_split, cross_val_score
 
 class DataCleaner:
     """
-    A class for cleaning and preprocessing retail transaction data.
-
-    This class handles data loading, cleaning operations, and basic exploratory
-    data analysis for online retail datasets.
+    Class phụ trách đọc, làm sạch và tiền xử lý dữ liệu giao dịch bán lẻ.
+    
+    Ý nghĩa chính:
+    - Load dữ liệu thô từ file CSV.
+    - Loại bỏ giao dịch không hợp lệ như hóa đơn hủy, quantity/price âm hoặc bằng 0.
+    - Lọc dữ liệu khách hàng tại United Kingdom.
+    - Tạo dữ liệu RFM dùng cho phân tích hành vi khách hàng.
+    
     """
 
     def __init__(self, data_path):
         """
-        Initialize the DataCleaner with data path.
-
+        Khởi tạo đối tượng DataCleaner.
+        
         Args:
-            data_path (str): Path to the raw data file
+        data_path (str): Đường dẫn đến file dữ liệu thô.
+        
         """
         self.data_path = data_path
         self.df = None
@@ -45,11 +59,13 @@ class DataCleaner:
 
     def load_data(self):
         """
-        Load and display basic information about the dataset.
-
+        Đọc dữ liệu thô từ file CSV và chuẩn hóa kiểu dữ liệu ban đầu.
+        
         Returns:
-            pd.DataFrame: Loaded dataframe
+        pd.DataFrame: DataFrame chứa dữ liệu vừa đọc từ file.
+        
         """
+        # Khai báo kiểu dữ liệu rõ ràng để đọc CSV ổn định hơn, tránh pandas tự suy đoán sai kiểu.
         dtype = dict(
             InvoiceNo=np.object_,
             StockCode=np.object_,
@@ -60,6 +76,7 @@ class DataCleaner:
             Country=np.object_,
         )
 
+        # Đọc dữ liệu từ CSV; parse_dates giúp InvoiceDate được chuyển sẵn sang kiểu datetime.
         self.df = pd.read_csv(
             self.data_path,
             encoding="ISO-8859-1",
@@ -82,10 +99,17 @@ class DataCleaner:
 
     def clean_data(self):
         """
-        Clean the dataset by removing invalid records and focusing on UK customers.
-
+        Làm sạch dữ liệu giao dịch.
+        
+        Các bước chính:
+        - Tính TotalPrice = Quantity * UnitPrice.
+        - Loại bỏ hóa đơn bị hủy.
+        - Chỉ giữ khách hàng ở United Kingdom.
+        - Loại bỏ bản ghi thiếu CustomerID hoặc có Quantity/UnitPrice không hợp lệ.
+        
         Returns:
-            pd.DataFrame: Cleaned UK dataset
+        pd.DataFrame: Dữ liệu UK đã được làm sạch.
+        
         """
         # Thêm cột TotalPrice
         self.df["TotalPrice"] = self.df["Quantity"] * self.df["UnitPrice"]
@@ -98,6 +122,10 @@ class DataCleaner:
 
         # Loại bỏ bản ghi thiếu CustomerID
         self.df_uk = self.df_uk.dropna(subset=["CustomerID"])
+        
+        # self.df_uk = self.df_uk[
+        #     ~self.df_uk["CustomerID"].str.contains("nan", case=False, na=False)
+        # ]
 
         # Loại bỏ các sản phẩm có quantity hoặc price không hợp lệ
         self.df_uk = self.df_uk[
@@ -108,18 +136,29 @@ class DataCleaner:
 
     def create_time_features(self):
         """
-        Create time-based features for analysis.
+        Tạo thêm các đặc trưng thời gian từ InvoiceDate.
+        
+        DayOfWeek giúp biết khách thường mua vào thứ mấy.
+        HourOfDay giúp biết khách thường mua vào khung giờ nào.
+        
         """
         self.df_uk["DayOfWeek"] = self.df_uk["InvoiceDate"].dt.dayofweek
         self.df_uk["HourOfDay"] = self.df_uk["InvoiceDate"].dt.hour
 
     def calculate_rfm(self):
         """
-        Calculate RFM (Recency, Frequency, Monetary) metrics.
-
+        Tính các chỉ số RFM cho từng khách hàng.
+        
+        RFM gồm:
+        - Recency: số ngày kể từ lần mua gần nhất.
+        - Frequency: số hóa đơn/giao dịch duy nhất.
+        - Monetary: tổng số tiền khách hàng đã chi tiêu.
+        
         Returns:
-            pd.DataFrame: RFM data for each customer
+        pd.DataFrame: Bảng RFM theo từng CustomerID.
+        
         """
+        # Chọn mốc thời gian giả định là sau ngày giao dịch cuối cùng 1 ngày để tính Recency.
         snapshot_date = self.df_uk["InvoiceDate"].max() + pd.Timedelta(days=1)
 
         self.rfm_data = self.df_uk.groupby("CustomerID").agg(
@@ -135,11 +174,13 @@ class DataCleaner:
 
     def save_cleaned_data(self, output_dir="../data/processed"):
         """
-        Save cleaned data to specified directory.
-
+        Lưu dữ liệu đã làm sạch ra thư mục processed.
+        
         Args:
-            output_dir (str): Output directory path
+        output_dir (str): Thư mục đầu ra để lưu file CSV.
+        
         """
+        # Tạo thư mục nếu chưa tồn tại, sau đó lưu dữ liệu sạch ra file CSV.
         os.makedirs(output_dir, exist_ok=True)
         self.df_uk.to_csv(f"{output_dir}/cleaned_uk_data.csv", index=False)
         print(f"Đã lưu dữ liệu đã làm sạch: {output_dir}/cleaned_uk_data.csv")
@@ -147,18 +188,21 @@ class DataCleaner:
 
 class FeatureEngineer:
     """
-    A class for creating customer-level features from transaction data.
-
-    This class aggregates transaction-level data into customer-level features
-    for clustering analysis.
+    Class phụ trách tạo đặc trưng ở cấp độ khách hàng.
+    
+    Dữ liệu ban đầu nằm ở cấp độ giao dịch/sản phẩm. Class này tổng hợp dữ liệu
+    thành một dòng cho mỗi CustomerID, sau đó biến đổi và chuẩn hóa đặc trưng
+    để đưa vào mô hình clustering.
+    
     """
 
     def __init__(self, data_path):
         """
-        Initialize the FeatureEngineer with cleaned data path.
-
+        Khởi tạo FeatureEngineer với đường dẫn dữ liệu đã làm sạch.
+        
         Args:
-            data_path (str): Path to cleaned data file
+        data_path (str): Đường dẫn đến file cleaned_uk_data.csv.
+        
         """
         self.data_path = data_path
         self.df = None
@@ -166,7 +210,8 @@ class FeatureEngineer:
         self.customer_features_transformed = None
         self.customer_features_scaled = None
 
-        # Định nghĩa các features
+        # Danh sách các feature sẽ được tính cho từng khách hàng.
+        # Các feature này mô tả quy mô mua hàng, tần suất mua, giá trị giao dịch và mức độ đa dạng sản phẩm.
         self.feature_customer = [
             "Sum_Quantity",
             "Mean_UnitPrice",
@@ -190,10 +235,11 @@ class FeatureEngineer:
 
     def load_data(self):
         """
-        Load cleaned data and prepare for feature engineering.
-
+        Đọc dữ liệu đã làm sạch và chuyển InvoiceDate về kiểu datetime.
+        
         Returns:
-            pd.DataFrame: Loaded cleaned data
+        pd.DataFrame: DataFrame dữ liệu giao dịch đã làm sạch.
+        
         """
         self.df = pd.read_csv(self.data_path)
         self.df["InvoiceDate"] = pd.to_datetime(self.df["InvoiceDate"])
@@ -203,12 +249,18 @@ class FeatureEngineer:
 
     def create_customer_features(self):
         """
-        Create customer-level aggregated features.
-
+        Tạo bộ đặc trưng tổng hợp cho từng khách hàng.
+        
+        Mỗi khách hàng sẽ được biểu diễn bằng các chỉ số như tổng số lượng mua,
+        tổng chi tiêu, số hóa đơn, số loại sản phẩm đã mua, giá trị trung bình
+        trên mỗi hóa đơn/sản phẩm, v.v.
+        
         Returns:
-            pd.DataFrame: Customer features dataframe
+        pd.DataFrame: Bảng đặc trưng theo từng CustomerID.
+        
         """
         num_customers = self.df["CustomerID"].nunique()
+        # Tạo DataFrame rỗng ban đầu: mỗi dòng tương ứng 1 khách hàng, mỗi cột là 1 feature.
         self.customer_features = pd.DataFrame(
             data=np.zeros((num_customers, len(self.feature_customer2)), dtype=float),
             columns=self.feature_customer2,
@@ -220,8 +272,9 @@ class FeatureEngineer:
 
         print("Đang tính toán features cho từng khách hàng...")
 
+        # Gom dữ liệu theo CustomerID để tính feature riêng cho từng khách hàng.
         for i, (customer_id, value) in enumerate(self.df.groupby("CustomerID")):
-            # Customer ID
+            # Gán mã khách hàng vào dòng hiện tại
             self.customer_features.iat[i, 0] = customer_id
 
             # 1. Tổng quantity
@@ -242,7 +295,8 @@ class FeatureEngineer:
             # 6. Số loại sản phẩm
             self.customer_features.iat[i, 6] = value.StockCode.nunique()
 
-            # 7-16. Các metrics khác
+            # 7-16. Các chỉ số hành vi nâng cao theo sản phẩm và theo hóa đơn.
+            # Những feature này giúp mô hình hiểu sâu hơn về cách khách mua hàng, không chỉ tổng chi tiêu.
             self.customer_features.iat[i, 7] = value.groupby("StockCode").size().mean()
             self.customer_features.iat[i, 8] = value.groupby("InvoiceNo").size().mean()
             self.customer_features.iat[i, 9] = (
@@ -278,15 +332,19 @@ class FeatureEngineer:
 
     def transform_features(self):
         """
-        Apply Box-Cox transformation to normalize feature distributions.
-
+        Áp dụng Box-Cox transformation để làm phân phối dữ liệu bớt lệch.
+        
+        Box-Cox thường dùng khi dữ liệu numeric bị lệch phải mạnh, ví dụ tổng
+        chi tiêu của một vài khách hàng rất cao so với phần còn lại.
+        
         Returns:
-            pd.DataFrame: Transformed features
+        pd.DataFrame: Bộ đặc trưng sau khi biến đổi Box-Cox.
+        
         """
-        # Set CustomerID as index
+        # Đặt CustomerID làm index vì CustomerID là mã định danh, không nên đưa vào tính toán numeric.
         customer_features_indexed = self.customer_features.set_index("CustomerID")
 
-        # Apply Box-Cox transformation
+        # Áp dụng Box-Cox để giảm skewness; cộng 1 để đảm bảo dữ liệu dương.
         feature_values = customer_features_indexed.values + 1  # Cộng 1 cho Box-Cox
 
         self.customer_features_transformed = customer_features_indexed.copy()
@@ -301,11 +359,16 @@ class FeatureEngineer:
 
     def scale_features(self):
         """
-        Apply standardization to features.
-
+        Chuẩn hóa dữ liệu bằng StandardScaler.
+        
+        Sau bước này, mỗi feature thường có trung bình gần 0 và độ lệch chuẩn gần 1.
+        Điều này rất quan trọng với K-Means vì thuật toán dựa trên khoảng cách.
+        
         Returns:
-            pd.DataFrame: Scaled features
+        pd.DataFrame: Bộ đặc trưng đã được scale.
+        
         """
+        # StandardScaler đưa các feature về cùng thang đo, tránh feature có giá trị lớn chi phối K-Means.
         scaler = StandardScaler()
         features_scaled = scaler.fit_transform(self.customer_features_transformed)
 
@@ -320,11 +383,12 @@ class FeatureEngineer:
 
     def plot_features_boxplots(self, transformed=False, save_path=None):
         """
-        Vẽ box plots cho tất cả features.
-
+        Vẽ boxplot cho toàn bộ features để quan sát outlier và độ phân tán.
+        
         Args:
-            transformed (bool): True để vẽ features đã biến đổi Box-Cox, False cho features gốc
-            save_path (str): Đường dẫn lưu ảnh (tùy chọn)
+        transformed (bool): True nếu muốn vẽ dữ liệu sau Box-Cox, False nếu vẽ dữ liệu gốc.
+        save_path (str): Đường dẫn lưu ảnh nếu muốn xuất biểu đồ ra file.
+        
         """
         if transformed and self.customer_features_transformed is not None:
             data = self.customer_features_transformed
@@ -358,11 +422,12 @@ class FeatureEngineer:
 
     def plot_features_histograms(self, transformed=False, save_path=None):
         """
-        Vẽ histograms cho tất cả features.
-
+        Vẽ histogram cho toàn bộ features để quan sát phân phối dữ liệu.
+        
         Args:
-            transformed (bool): True để vẽ features đã biến đổi Box-Cox, False cho features gốc
-            save_path (str): Đường dẫn lưu ảnh (tùy chọn)
+        transformed (bool): True nếu muốn vẽ dữ liệu sau Box-Cox, False nếu vẽ dữ liệu gốc.
+        save_path (str): Đường dẫn lưu ảnh nếu muốn xuất biểu đồ ra file.
+        
         """
         if transformed and self.customer_features_transformed is not None:
             data = self.customer_features_transformed
@@ -401,23 +466,29 @@ class FeatureEngineer:
 
     def save_features(self, output_dir="../data/processed"):
         """
-        Save all processed features.
-
+        Lưu các bộ feature đã xử lý ra file CSV.
+        
+        Bao gồm:
+        - customer_features.csv: feature gốc.
+        - customer_features_transformed.csv: feature sau Box-Cox.
+        - customer_features_scaled.csv: feature sau chuẩn hóa.
+        
         Args:
-            output_dir (str): Output directory path
+        output_dir (str): Thư mục đầu ra để lưu file.
+        
         """
         os.makedirs(output_dir, exist_ok=True)
 
-        # Lưu original features
+        # Lưu feature gốc để dùng cho việc giải thích business sau khi phân cụm.
         customer_features_indexed = self.customer_features.set_index("CustomerID")
         customer_features_indexed.to_csv(f"{output_dir}/customer_features.csv")
 
-        # Lưu transformed features
+        # Lưu feature đã biến đổi Box-Cox để kiểm tra/phân tích lại khi cần.
         self.customer_features_transformed.to_csv(
             f"{output_dir}/customer_features_transformed.csv"
         )
 
-        # Lưu scaled features
+        # Lưu feature đã scale; đây thường là input chính cho K-Means/PCA.
         self.customer_features_scaled.to_csv(
             f"{output_dir}/customer_features_scaled.csv"
         )
@@ -427,13 +498,18 @@ class FeatureEngineer:
 
 class ClusterAnalyzer:
     """
-    A class for performing clustering analysis and visualization.
-
-    This class handles PCA, optimal cluster determination, K-means clustering,
-    and cluster visualization and interpretation.
+    Class phụ trách phân tích clustering và trực quan hóa kết quả phân cụm.
+    
+    Các chức năng chính:
+    - Đọc feature gốc và feature đã chuẩn hóa.
+    - Giảm chiều dữ liệu bằng PCA.
+    - Tìm số cụm phù hợp bằng Elbow và Silhouette Score.
+    - Huấn luyện K-Means với nhiều giá trị k.
+    - Vẽ biểu đồ PCA, radar chart và giải thích cụm bằng SHAP.
+    
     """
 
-    # Vietnamese feature names mapping
+    # Mapping tên feature tiếng Anh sang tiếng Việt để biểu đồ/báo cáo dễ hiểu hơn.
     FEATURE_NAMES_VN = {
         "Sum_Quantity": "Tổng số lượng mua",
         "Mean_UnitPrice": "Giá trung bình",
@@ -455,11 +531,12 @@ class ClusterAnalyzer:
 
     def __init__(self, scaled_features_path, original_features_path):
         """
-        Initialize the ClusterAnalyzer with feature data paths.
-
+        Khởi tạo ClusterAnalyzer với đường dẫn feature đã scale và feature gốc.
+        
         Args:
-            scaled_features_path (str): Path to scaled features file
-            original_features_path (str): Path to original features file
+        scaled_features_path (str): Đường dẫn file customer_features_scaled.csv.
+        original_features_path (str): Đường dẫn file customer_features.csv.
+        
         """
         self.scaled_features_path = scaled_features_path
         self.original_features_path = original_features_path
@@ -474,10 +551,11 @@ class ClusterAnalyzer:
 
     def load_data(self):
         """
-        Load scaled and original features data.
-
+        Đọc dữ liệu feature đã scale và feature gốc.
+        
         Returns:
-            tuple: (scaled_features_df, original_features_df)
+        tuple: Gồm (df_scaled, df_original).
+        
         """
         self.df_scaled = pd.read_csv(self.scaled_features_path, index_col=0)
         self.df_original = pd.read_csv(self.original_features_path, index_col=0)
@@ -489,14 +567,20 @@ class ClusterAnalyzer:
 
     def apply_pca(self, n_components=None):
         """
-        Apply Principal Component Analysis.
-
+        Áp dụng PCA để giảm chiều dữ liệu.
+        
+        PCA giúp nén nhiều features về một số trục chính, thường dùng để:
+        - Vẽ dữ liệu 2D/3D dễ quan sát hơn.
+        - Xem các chiều chính giải thích được bao nhiêu phương sai.
+        
         Args:
-            n_components (int): Number of components to keep
-
+        n_components (int): Số thành phần chính muốn giữ lại. Nếu None thì giữ tối đa.
+        
         Returns:
-            pd.DataFrame: PCA-transformed data
+        pd.DataFrame: Dữ liệu sau khi biến đổi PCA.
+        
         """
+        # PCA học các trục chính từ dữ liệu đã scale rồi chiếu dữ liệu sang không gian mới.
         self.pca = PCA(n_components=n_components)
         pca_features = self.pca.fit_transform(self.df_scaled)
 
@@ -510,7 +594,11 @@ class ClusterAnalyzer:
 
     def plot_pca_variance(self):
         """
-        Plot explained variance ratio from PCA.
+        Vẽ biểu đồ tỷ lệ phương sai được giải thích bởi từng thành phần PCA.
+        
+        Biểu đồ này giúp quyết định nên giữ bao nhiêu principal components
+        để vẫn giữ được phần lớn thông tin trong dữ liệu.
+        
         """
         plt.figure(figsize=(12, 6))
 
@@ -547,17 +635,20 @@ class ClusterAnalyzer:
 
     def find_optimal_clusters(self, k_range=range(2, 11)):
         """
-        Find optimal number of clusters using multiple methods.
-
+        Tìm số lượng cụm phù hợp bằng Elbow Method và Silhouette Score.
+        
         Args:
-            k_range (range): Range of k values to test
-
+        k_range (range): Dải giá trị k cần thử, ví dụ range(2, 11).
+        
         Returns:
-            dict: Results from different methods
+        dict: Kết quả inertia, silhouette score và k tốt nhất theo silhouette.
+        
         """
+        # inertia đo tổng khoảng cách trong cụm; silhouette đo mức độ tách biệt giữa các cụm.
         inertias = []
         silhouette_scores = []
 
+        # Thử từng giá trị k để so sánh chất lượng phân cụm.
         for k in k_range:
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
             labels = kmeans.fit_predict(self.df_scaled)
@@ -576,11 +667,15 @@ class ClusterAnalyzer:
 
     def plot_optimal_clusters(self):
         """
-        Plot Elbow method and Silhouette scores for cluster selection.
+        Vẽ biểu đồ Elbow và Silhouette Score để hỗ trợ chọn số cụm.
+        
+        Elbow quan sát điểm mà inertia giảm chậm lại.
+        Silhouette Score đo mức độ tách biệt giữa các cụm, càng cao thường càng tốt.
+        
         """
         fig, axes = plt.subplots(1, 2, figsize=(16, 5))
 
-        # Elbow Method
+        # Elbow Method: tìm điểm gãy khi tăng k không còn giúp giảm inertia nhiều nữa.
         axes[0].plot(
             self.optimal_clusters["k_range"],
             self.optimal_clusters["inertias"],
@@ -594,7 +689,7 @@ class ClusterAnalyzer:
         axes[0].set_title("Phương pháp Elbow")
         axes[0].grid(True, alpha=0.3)
 
-        # Silhouette Score
+        # Silhouette Score: càng cao thì các cụm càng tách biệt và ít chồng lấn hơn.
         axes[1].plot(
             self.optimal_clusters["k_range"],
             self.optimal_clusters["silhouette_scores"],
@@ -627,19 +722,20 @@ class ClusterAnalyzer:
 
     def apply_kmeans(self, k_values=[3, 4]):
         """
-        Apply K-means clustering with different k values.
-
+        Huấn luyện K-Means với một hoặc nhiều giá trị k.
+        
         Args:
-            k_values (list): List of k values to apply
-
+        k_values (list): Danh sách số cụm muốn thử, ví dụ [3, 4].
+        
         Returns:
-            dict: Clustering results for each k
+        dict: Kết quả phân cụm, kích thước cụm và trung bình feature theo cụm.
+        
         """
         for k in k_values:
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
             clusters = kmeans.fit_predict(self.df_scaled)
 
-            # Add clusters to dataframes
+            # Thêm nhãn cụm vào cả dữ liệu scaled, PCA và original để tiện vẽ biểu đồ/giải thích.
             cluster_col = f"Cluster_{k}"
             self.df_scaled[cluster_col] = clusters
             self.df_pca[cluster_col] = clusters
@@ -658,10 +754,11 @@ class ClusterAnalyzer:
 
     def plot_clusters_pca(self, k_values=[3, 4]):
         """
-        Visualize clusters in PCA space.
-
+        Vẽ kết quả phân cụm trên mặt phẳng PCA 2D.
+        
         Args:
-            k_values (list): List of k values to visualize
+        k_values (list): Danh sách các giá trị k cần trực quan hóa.
+        
         """
         fig, axes = plt.subplots(1, len(k_values), figsize=(16, 6))
         if len(k_values) == 1:
@@ -687,11 +784,13 @@ class ClusterAnalyzer:
 
     def plot_clusters_pca_3d(self, k_values=[3, 4]):
         """
-        Visualize clusters in 3D PCA space.
-
+        Vẽ kết quả phân cụm trong không gian PCA 3D.
+        
         Args:
-            k_values (list): List of k values to visualize
+        k_values (list): Danh sách các giá trị k cần trực quan hóa.
+        
         """
+        # Import 3D plotting ngay trong hàm vì chỉ hàm này cần dùng.
         from mpl_toolkits.mplot3d import Axes3D
 
         fig = plt.figure(figsize=(16, 6))
@@ -715,7 +814,7 @@ class ClusterAnalyzer:
             ax.set_zlabel("PC3")
             ax.set_title(f"Phân cụm K-Means 3D (k={k})")
 
-            # Add colorbar
+            # Thêm thanh màu để biết mỗi màu tương ứng cluster nào.
             plt.colorbar(scatter, ax=ax, label="Cluster", shrink=0.5)
 
         plt.tight_layout()
@@ -723,11 +822,12 @@ class ClusterAnalyzer:
 
     def create_radar_chart(self, k, cluster_names=None):
         """
-        Create professional radar chart for cluster analysis.
-
+        Tạo radar chart tổng hợp để so sánh đặc điểm các cụm khách hàng.
+        
         Args:
-            k (int): Number of clusters
-            cluster_names (list): Custom names for clusters
+        k (int): Số cụm đang phân tích.
+        cluster_names (list): Tên tùy chỉnh cho từng cụm, nếu có.
+        
         """
         cluster_means = self.cluster_results[k]["means"]
 
@@ -741,11 +841,11 @@ class ClusterAnalyzer:
             "Mean_TotalPriceSumPerInvoice": "Giá trị/giao dịch",
         }
 
-        # Filter và chuẩn hóa dữ liệu
+        # Lọc các feature quan trọng và chuẩn hóa dữ liệu
         feature_keys = list(important_features.keys())
         data_selected = cluster_means[feature_keys]
 
-        # Global normalization
+        # Chuẩn hóa global theo min-max để các feature có thể so sánh trên cùng radar chart.
         global_min = data_selected.min()
         global_max = data_selected.max()
         data_normalized = (data_selected - global_min) / (global_max - global_min)
@@ -756,13 +856,13 @@ class ClusterAnalyzer:
             important_features[col] for col in data_normalized.columns
         ]
 
-        # Setup radar chart
+        # Thiết lập các góc trên biểu đồ radar, mỗi góc đại diện cho một feature.
         categories = list(data_normalized.columns)
         N = len(categories)
         angles = [n / float(N) * 2 * np.pi for n in range(N)]
         angles += angles[:1]
 
-        # Colors
+        # Chọn màu cho từng cluster để biểu đồ dễ phân biệt.
         colors = (
             ["#E74C3C", "#3498DB", "#2ECC71", "#F39C12"]
             if k == 4
@@ -771,7 +871,7 @@ class ClusterAnalyzer:
         if not cluster_names:
             cluster_names = [f"Nhóm {i}" for i in range(k)]
 
-        # Create plot
+        # Tạo biểu đồ radar dạng polar plot.
         fig, ax = plt.subplots(figsize=(12, 12), subplot_kw=dict(projection="polar"))
 
         for idx, (cluster_id, row) in enumerate(data_normalized.iterrows()):
@@ -797,7 +897,7 @@ class ClusterAnalyzer:
             )
             ax.fill(angles, values, alpha=0.15, color=color)
 
-        # Styling
+        # Tinh chỉnh giao diện biểu đồ cho dễ đọc và chuyên nghiệp hơn.
         ax.set_xticks(angles[:-1])
         ax.set_xticklabels(categories, size=12, weight="bold", color="#2C3E50")
         ax.set_ylim(0, 1)
@@ -822,11 +922,12 @@ class ClusterAnalyzer:
 
     def create_individual_radar_plots(self, k, cluster_names=None):
         """
-        Tạo radar plot riêng cho từng cluster.
-
+        Tạo radar chart riêng cho từng cụm để xem profile chi tiết hơn.
+        
         Args:
-            k (int): Number of clusters
-            cluster_names (list): Custom names for clusters
+        k (int): Số cụm đang phân tích.
+        cluster_names (list): Tên tùy chỉnh cho từng cụm, nếu có.
+        
         """
         cluster_means = self.cluster_results[k]["means"]
 
@@ -856,7 +957,7 @@ class ClusterAnalyzer:
             important_features[col] for col in data_normalized.columns
         ]
 
-        # Setup angles
+        # Tính góc cho từng feature trên radar plot.
         categories = list(data_normalized.columns)
         N = len(categories)
         angles = [n / float(N) * 2 * np.pi for n in range(N)]
@@ -907,7 +1008,7 @@ class ClusterAnalyzer:
                 cluster_names[idx] if idx < len(cluster_names) else f"Cluster {idx}"
             )
 
-            # Vẽ radar
+            # Vẽ đường radar và vùng tô màu cho cluster hiện tại
             ax.plot(
                 angles,
                 values,
@@ -933,7 +1034,7 @@ class ClusterAnalyzer:
             ax.grid(True, alpha=0.3, color="#BDC3C7", linewidth=1)
             ax.set_facecolor("#FAFAFA")
 
-            # Title cho mỗi subplot
+            # Tiêu đề cho từng biểu đồ con
             ax.set_title(
                 f"{cluster_name}\n({cluster_means.index[idx]})",
                 size=13,
@@ -948,87 +1049,151 @@ class ClusterAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    def train_surrogate_model(self, k):
-        """
-        Huấn luyện mô hình RandomForest classifier để có thể mô phỏng thuật toán KMeans.
-        Mô hình này sẽ được dùng cho phân tích lời giải thích của SHAP.
+    # def train_surrogate_model(self, k):
+    #     """
+    #     Huấn luyện mô hình RandomForest để mô phỏng kết quả phân cụm của K-Means.
         
-        Args:
-            k (int): Number of clusters
-            
-        Returns:
-            dict: Training results including model and metrics
-        """
+    #     Vì K-Means khó giải thích trực tiếp bằng SHAP, ta dùng RandomForest học lại
+    #     nhãn cụm của K-Means. Nếu RandomForest dự đoán lại nhãn cụm đủ tốt, ta có
+    #     thể dùng SHAP trên RandomForest để hiểu feature nào ảnh hưởng đến từng cụm.
+        
+    #     Args:
+    #     k (int): Số cụm cần giải thích.
+        
+    #     Returns:
+    #     dict: Mô hình thay thế và các chỉ số đánh giá như accuracy, confusion matrix.
+        
+    #     """
+    #     if k not in self.cluster_results:
+    #         raise ValueError(f"Cluster results for k={k} not found. Run apply_kmeans first.")
+        
+    #     # Lấy tất cả cột không phải là Cluster_
+    #     feature_cols = [col for col in self.df_scaled.columns if not col.startswith('Cluster_')]
+    #     X = self.df_scaled[feature_cols].values
+    #     y = self.cluster_results[k]['labels']
+        
+    #     # Huấn luyện mô hình RandomForest classifier
+    #     rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    #     rf_model.fit(X, y)
+        
+    #     # Dự đoán lại nhãn cụm bằng mô hình thay thế
+    #     y_pred = rf_model.predict(X)
+        
+    #     # Tính các chỉ số để xem RandomForest mô phỏng K-Means tốt đến đâu
+    #     accuracy = accuracy_score(y, y_pred)
+    #     conf_matrix = confusion_matrix(y, y_pred)
+        
+    #     # Lưu model, metric và thông tin feature để dùng ở bước SHAP
+    #     self.surrogate_models[k] = {
+    #         'model': rf_model,
+    #         'accuracy': accuracy,
+    #         'confusion_matrix': conf_matrix,
+    #         'feature_names': feature_cols
+    #     }
+        
+    #     # In báo cáo kết quả huấn luyện mô hình thay thế
+    #     print(f"=== HUẤN LUYỆN MÔ HÌNH THAY THẾ (k={k}) ===")
+    #     print(f"Độ chính xác: {accuracy:.4f} ({accuracy*100:.2f}%)")
+    #     print(f"\nConfusion Matrix:")
+    #     print(conf_matrix)
+    #     print(f"\nMô hình có thể dự đoán {'CHÍNH XÁC' if accuracy >= 0.95 else 'HỢP LÝ'} các phân cụm.")
+        
+    #     return self.surrogate_models[k]
+    def train_surrogate_model(self, k, test_size=0.2):
         if k not in self.cluster_results:
-            raise ValueError(f"Cluster results for k={k} not found. Run apply_kmeans first.")
-        
-        # Lấy tất cả cột không phải là Cluster_
-        feature_cols = [col for col in self.df_scaled.columns if not col.startswith('Cluster_')]
+            raise ValueError(f"Cluster results for k={k} not found.")
+
+        feature_cols = [col for col in self.df_scaled.columns 
+                        if not col.startswith('Cluster_')]
         X = self.df_scaled[feature_cols].values
         y = self.cluster_results[k]['labels']
+
+        # ✅ Split trước khi train
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=42, stratify=y
+        )
+
+        # ✅ Giới hạn depth để tránh memorize
+        rf_model = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,        # thêm dòng này
+            random_state=42,
+            n_jobs=-1
+        )
+
+        # ✅ Cross-validation để đánh giá robust hơn
+        cv_scores = cross_val_score(rf_model, X_train, y_train, cv=5)
         
-        # Huấn luyện mô hình RandomForest classifier
-        rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+        # Train final model trên toàn bộ X để SHAP dùng full data
         rf_model.fit(X, y)
-        
-        # Dự đoán
-        y_pred = rf_model.predict(X)
-        
-        # Tính toán các chỉ số
-        accuracy = accuracy_score(y, y_pred)
-        conf_matrix = confusion_matrix(y, y_pred)
-        
-        # Lưu kết quả
+
+        # ✅ Evaluate trên test set
+        y_pred_test = rf_model.predict(X_test)
+        test_accuracy = accuracy_score(y_test, y_pred_test)
+        train_accuracy = accuracy_score(y, rf_model.predict(X))
+
+        conf_matrix = confusion_matrix(y_test, y_pred_test)
+
         self.surrogate_models[k] = {
             'model': rf_model,
-            'accuracy': accuracy,
+            'train_accuracy': train_accuracy,
+            'test_accuracy': test_accuracy,
+            'cv_scores': cv_scores,
             'confusion_matrix': conf_matrix,
             'feature_names': feature_cols
         }
-        
-        # In báo kết quả
-        print(f"=== HUẤN LUYỆN MÔ HÌNH THAY THẾ (k={k}) ===")
-        print(f"Độ chính xác: {accuracy:.4f} ({accuracy*100:.2f}%)")
-        print(f"\nConfusion Matrix:")
+
+        print(f"=== SURROGATE MODEL (k={k}) ===")
+        print(f"Train accuracy : {train_accuracy*100:.2f}%")
+        print(f"Test accuracy  : {test_accuracy*100:.2f}%")   # ← con số này mới quan trọng
+        print(f"CV scores      : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+        print(f"\nConfusion Matrix (test set):")
         print(conf_matrix)
-        print(f"\nMô hình có thể dự đoán {'CHÍNH XÁC' if accuracy >= 0.95 else 'HỢP LÝ'} các phân cụm.")
-        
+
+        # ✅ Cảnh báo nếu overfit
+        gap = train_accuracy - test_accuracy
+        if gap > 0.05:
+            print(f"\n⚠️  Overfit gap: {gap:.2%} — cân nhắc tăng max_depth hoặc min_samples_leaf")
+        else:
+            print(f"\n✅ Model ổn định (gap = {gap:.2%})")
+
         return self.surrogate_models[k]
-    
+
     def calculate_shap_values(self, k):
         """
-        Tính toán SHAP values cho lời giải thích kết quả phân cụm sử dụng toàn bộ dữ liệu.
+        Tính SHAP values để giải thích lý do khách hàng thuộc từng cụm.
         
         Args:
-            k (int): Number of clusters
-            
+        k (int): Số cụm cần phân tích SHAP.
+        
         Returns:
-            dict: SHAP explainer and values
+        dict: SHAP explainer, SHAP values, dữ liệu đầu vào và tên features.
+        
         """
         if k not in self.surrogate_models:
             raise ValueError(f"Mô hình thay thế cho k={k} không tìm thấy. Vui lòng chạy train_surrogate_model trước.")
         
-        # Lấy mô hình và các đặc trưng
+        # Lấy mô hình thay thế và danh sách feature đã dùng khi huấn luyện
         rf_model = self.surrogate_models[k]['model']
         feature_cols = self.surrogate_models[k]['feature_names']
         X = self.df_scaled[feature_cols].values
         
-        # Tạo SHAP explainer với toàn bộ dữ liệu làm nền (background)
+        # Tạo SHAP explainer để tính mức đóng góp của từng feature
         # Khi dữ liệu làm nền càng lớn thì thuật toán SHAP càng chính xác
         print(f"Tính toán SHAP values cho {len(X):,} khách hàng...")
         explainer = shap.TreeExplainer(rf_model)
         shap_values_raw = explainer.shap_values(X)
         
-        # Chuyển đổi sang định dạng list cho trường hợp đa lớp
+        # Chuyển SHAP values sang dạng list cho bài toán nhiều cluster
         # Shape: (n_samples, n_features, n_classes) -> list (n_samples, n_features)
         if isinstance(shap_values_raw, np.ndarray) and len(shap_values_raw.shape) == 3:
-            # TH đa lớp: chuyển vị để có (n_classes, n_samples, n_features)
+            # Trường hợp nhiều lớp: tách SHAP values theo từng cluster
             shap_values = [shap_values_raw[:, :, i] for i in range(shap_values_raw.shape[2])]
         else:
-            # TH nhị phân: Đã ở định dạng list hoặc phân loại nhị phân
+            # Trường hợp nhị phân hoặc SHAP đã trả về đúng định dạng
             shap_values = shap_values_raw
         
-        # Lưu kết quả
+        # Lưu model, metric và thông tin feature để dùng ở bước SHAP
         self.shap_results[k] = {
             'explainer': explainer,
             'shap_values': shap_values,
@@ -1041,11 +1206,15 @@ class ClusterAnalyzer:
     
     def plot_shap_summary(self, k, cluster_id=None):
         """
-        Vẽ biểu đồ tóm tắt SHAP (beeswarm plot) cho phân tích cụm.
+        Vẽ SHAP summary plot cho từng cụm.
+        
+        Biểu đồ này cho biết những feature nào quan trọng nhất trong việc dự đoán
+        khách hàng thuộc vào một cluster cụ thể.
         
         Args:
-            k (int): Number of clusters
-            cluster_id (int, optional): Specific cluster to visualize. If None, shows all.
+        k (int): Số cụm đang phân tích.
+        cluster_id (int, optional): Cluster cụ thể muốn vẽ. Hiện tại hàm đang lặp qua tất cả cluster.
+        
         """
         if k not in self.shap_results:
             raise ValueError(f"Giá trị SHAP cho k={k} không tìm thấy. Vui lòng chạy calculate_shap_values trước.")
@@ -1065,10 +1234,11 @@ class ClusterAnalyzer:
 
     def save_clusters(self, output_dir="../data/processed"):
         """
-        Save cluster assignments.
-
+        Lưu nhãn cụm của từng khách hàng ra file CSV.
+        
         Args:
-            output_dir (str): Output directory path
+        output_dir (str): Thư mục đầu ra để lưu kết quả phân cụm.
+        
         """
         os.makedirs(output_dir, exist_ok=True)
 
@@ -1089,25 +1259,30 @@ class ClusterAnalyzer:
 
 class DataVisualizer:
     """
-    A class for creating visualizations for customer segmentation analysis.
-
-    This class provides methods for plotting various aspects of the data
-    including temporal patterns, customer behavior, and cluster analysis.
+    Class phụ trách trực quan hóa dữ liệu và kết quả phân tích khách hàng.
+    
+    Các biểu đồ trong class này giúp hiểu doanh thu, thời điểm mua hàng,
+    sản phẩm bán chạy, phân phối hành vi khách hàng và RFM.
+    
     """
 
     def __init__(self):
-        """Initialize the DataVisualizer with plotting settings."""
+        """
+        Khởi tạo DataVisualizer và thiết lập style mặc định cho biểu đồ.
+        
+        """
         plt.style.use("seaborn-v0_8-whitegrid")
         sns.set_palette("viridis")
 
     def plot_revenue_over_time(self, df):
         """
-        Plot daily and monthly revenue patterns.
-
+        Vẽ doanh thu theo ngày và theo tháng.
+        
         Args:
-            df (pd.DataFrame): Dataframe with InvoiceDate and TotalPrice columns
+        df (pd.DataFrame): DataFrame có cột InvoiceDate và TotalPrice.
+        
         """
-        # Daily revenue
+        # Doanh thu theo ngày: giúp xem xu hướng và biến động ngắn hạn.
         plt.figure(figsize=(12, 5))
         daily_revenue = df.groupby(df["InvoiceDate"].dt.date)["TotalPrice"].sum()
         daily_revenue.plot()
@@ -1117,7 +1292,7 @@ class DataVisualizer:
         plt.tight_layout()
         plt.show()
 
-        # Monthly revenue
+        # Doanh thu theo tháng: giúp xem xu hướng tổng quát theo thời gian.
         plt.figure(figsize=(12, 5))
         monthly_revenue = df.groupby(pd.Grouper(key="InvoiceDate", freq="M"))[
             "TotalPrice"
@@ -1132,10 +1307,11 @@ class DataVisualizer:
 
     def plot_time_patterns(self, df):
         """
-        Plot purchase patterns by day and hour.
-
+        Vẽ heatmap thể hiện số lượng giao dịch theo thứ trong tuần và giờ trong ngày.
+        
         Args:
-            df (pd.DataFrame): Dataframe with time features
+        df (pd.DataFrame): DataFrame đã có các cột DayOfWeek và HourOfDay.
+        
         """
         plt.figure(figsize=(12, 5))
         day_hour_counts = (
@@ -1150,11 +1326,12 @@ class DataVisualizer:
 
     def plot_product_analysis(self, df, top_n=10):
         """
-        Plot top products by quantity and revenue.
-
+        Vẽ top sản phẩm theo số lượng bán và theo doanh thu.
+        
         Args:
-            df (pd.DataFrame): Transaction dataframe
-            top_n (int): Number of top products to show
+        df (pd.DataFrame): DataFrame giao dịch.
+        top_n (int): Số lượng sản phẩm top muốn hiển thị.
+        
         """
         # Top sản phẩm theo số lượng
         plt.figure(figsize=(12, 5))
@@ -1186,12 +1363,17 @@ class DataVisualizer:
 
     def plot_customer_distribution(self, df):
         """
-        Plot customer behavior distributions.
-
+        Vẽ phân phối hành vi khách hàng.
+        
+        Bao gồm:
+        - Số giao dịch trên mỗi khách hàng.
+        - Tổng chi tiêu trên mỗi khách hàng, có lọc bớt outlier 1% cao nhất.
+        
         Args:
-            df (pd.DataFrame): Transaction dataframe
+        df (pd.DataFrame): DataFrame giao dịch.
+        
         """
-        # Số giao dịch trên mỗi khách hàng
+        # Phân phối số hóa đơn/giao dịch của từng khách hàng
         plt.figure(figsize=(10, 5))
         transactions_per_customer = df.groupby("CustomerID")["InvoiceNo"].nunique()
         sns.histplot(transactions_per_customer, bins=30, kde=True)
@@ -1201,7 +1383,7 @@ class DataVisualizer:
         plt.tight_layout()
         plt.show()
 
-        # Chi tiêu trên mỗi khách hàng
+        # Phân phối tổng chi tiêu của từng khách hàng
         plt.figure(figsize=(10, 5))
         spend_per_customer = df.groupby("CustomerID")["TotalPrice"].sum()
         spend_filter = spend_per_customer < spend_per_customer.quantile(0.99)
@@ -1214,12 +1396,13 @@ class DataVisualizer:
 
     def plot_rfm_analysis(self, rfm_data):
         """
-        Plot RFM analysis visualizations.
-
+        Vẽ phân phối các chỉ số RFM.
+        
         Args:
-            rfm_data (pd.DataFrame): RFM dataframe
+        rfm_data (pd.DataFrame): DataFrame chứa Recency, Frequency, Monetary.
+        
         """
-        # RFM distributions
+        # Vẽ lần lượt phân phối Recency, Frequency và Monetary để hiểu hành vi khách hàng.
         fig, axes = plt.subplots(3, 1, figsize=(12, 10))
 
         sns.histplot(rfm_data["Recency"], bins=30, kde=True, ax=axes[0])
