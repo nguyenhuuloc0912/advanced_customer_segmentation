@@ -28,7 +28,7 @@ var/
 
 # Data files - uncomment if you want to ignore data files
 # data/raw/
-data/processed/
+# data/processed/
 
 # Model files - uncomment if you want to ignore model files
 # models/
