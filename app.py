@@ -42,23 +42,25 @@ st.markdown(
   @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
 
   :root {
-    --bg: #0d0f1a;
-    --surface: #151828;
-    --card: #1c2035;
-    --border: #2a2f4a;
-    --accent1: #6c63ff;
-    --accent2: #ff6584;
-    --accent3: #43e97b;
-    --accent4: #f7971e;
-    --text: #e8eaf0;
-    --muted: #8890a8;
+    --bg: #0a0d14;
+    --surface: #11151f;
+    --card: #171c28;
+    --border: #262c3a;
+    --accent1: #7c8aff;
+    --accent2: #ff8fa3;
+    --accent3: #2dd4a7;
+    --accent4: #f0b429;
+    --accent5: #a78bfa;
+    --accent6: #7b8794;
+    --text: #edf0f5;
+    --muted: #8894a8;
   }
 
   html, body, [data-testid="stAppViewContainer"] {
         background:
-            radial-gradient(circle at top left, rgba(108, 99, 255, 0.18), transparent 28%),
-            radial-gradient(circle at top right, rgba(247, 151, 30, 0.12), transparent 24%),
-            linear-gradient(180deg, #0d0f1a 0%, #0b1020 100%) !important;
+            radial-gradient(circle at top left, rgba(124, 138, 255, 0.16), transparent 30%),
+            radial-gradient(circle at top right, rgba(240, 180, 41, 0.10), transparent 26%),
+            linear-gradient(180deg, #0a0d14 0%, #080a10 100%) !important;
     color: var(--text) !important;
     font-family: 'DM Sans', sans-serif;
   }
@@ -211,8 +213,8 @@ st.markdown(
 # ─────────────────────────────────────────────
 # CONSTANTS
 # ─────────────────────────────────────────────
-CLUSTER_COLORS_K3 = {0: "#6c63ff", 1: "#ff6584", 2: "#43e97b"}
-CLUSTER_COLORS_K4 = {0: "#6c63ff", 1: "#ff6584", 2: "#43e97b", 3: "#f7971e"}
+CLUSTER_COLORS_K3 = {0: "#f0b429", 1: "#2dd4a7", 2: "#a78bfa"}
+CLUSTER_COLORS_K4 = {0: "#7b8794", 1: "#f0b429", 2: "#2dd4a7", 3: "#a78bfa"}
 
 FEATURE_NAMES_VN = {
     "Sum_Quantity": "Tổng số lượng mua",
@@ -245,16 +247,16 @@ RADAR_FEATURES = {
 }
 
 SEGMENT_PERSONAS_K4 = {
-    0: {"name": "Nhóm quy mô trung bình", "color": "#6c63ff", "desc": "Chi tiêu và khối lượng mua ở mức vừa phải"},
-    1: {"name": "Nhóm giá trung bình cao", "color": "#ff6584", "desc": "Mức giá trung bình cao hơn mặt bằng chung"},
-    2: {"name": "Nhóm mua nhiều thường xuyên", "color": "#43e97b", "desc": "Tổng chi tiêu và số lượng mua nổi bật"},
-    3: {"name": "Nhóm đa dạng sản phẩm", "color": "#f7971e", "desc": "Danh mục mua sắm rộng và phân tán hơn"},
+    0: {"name": "Nhóm giá trị thấp", "color": "#7b8794", "desc": "Giá mua, tổng chi tiêu và tần suất đều thấp nhất — cơ hội để kích hoạt lại"},
+    1: {"name": "Nhóm Premium", "color": "#f0b429", "desc": "Giá mua trung bình cao nhất, mua ít nhưng chi mạnh cho từng sản phẩm"},
+    2: {"name": "Nhóm mua nhiều thường xuyên", "color": "#2dd4a7", "desc": "Tổng chi tiêu, số lượng và tần suất mua đều cao nhất"},
+    3: {"name": "Nhóm đa dạng sản phẩm", "color": "#a78bfa", "desc": "Danh mục mua sắm rộng và phân tán hơn"},
 }
 
 SEGMENT_PERSONAS_K3 = {
-    0: {"name": "Nhóm giá trị cao", "color": "#6c63ff", "desc": "Chi tiêu và mức giá mua cao"},
-    1: {"name": "Nhóm mua nhiều", "color": "#ff6584", "desc": "Tổng chi tiêu và khối lượng mua lớn"},
-    2: {"name": "Nhóm đa dạng", "color": "#43e97b", "desc": "Khách hàng có danh mục mua sắm đa dạng"},
+    0: {"name": "Nhóm giá trị cao", "color": "#f0b429", "desc": "Chi tiêu và mức giá mua cao"},
+    1: {"name": "Nhóm mua nhiều", "color": "#2dd4a7", "desc": "Tổng chi tiêu và khối lượng mua lớn"},
+    2: {"name": "Nhóm đa dạng", "color": "#a78bfa", "desc": "Khách hàng có danh mục mua sắm đa dạng"},
 }
 
 DATA_DIR = "data/processed"
@@ -308,9 +310,9 @@ def merge_clusters(features_df, clusters_df, k):
 PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#e8eaf0", family="DM Sans"),
-    xaxis=dict(gridcolor="#2a2f4a", zerolinecolor="#2a2f4a"),
-    yaxis=dict(gridcolor="#2a2f4a", zerolinecolor="#2a2f4a"),
+    font=dict(color="#edf0f5", family="DM Sans"),
+    xaxis=dict(gridcolor="#262c3a", zerolinecolor="#262c3a"),
+    yaxis=dict(gridcolor="#262c3a", zerolinecolor="#262c3a"),
     margin=dict(l=40, r=20, t=40, b=40),
 )
 
@@ -343,12 +345,12 @@ with st.sidebar:
     st.markdown("<div class='section-header'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "Chọn trang",
-        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng"],
+        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "⚖️ So Sánh K=3 vs K=4", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng", "🧪 Mô Phỏng Khách Hàng"],
         label_visibility="collapsed",
     )
     st.markdown("---")
     st.markdown(
-        "<div style='color:#8890a8;font-size:0.72rem;'>Online Retail Dataset · UK Customers<br>KMeans + PCA + Feature Engineering</div>",
+        "<div style='color:#8894a8;font-size:0.72rem;'>Online Retail Dataset · UK Customers<br>KMeans + PCA + Feature Engineering</div>",
         unsafe_allow_html=True,
     )
 
@@ -429,13 +431,13 @@ if page == "📊 Tổng Quan":
                 bar_fig = go.Figure(go.Bar(
                     x=[count], y=[persona["name"]], orientation="h",
                     marker_color=persona["color"], text=[f"{count:,} ({pct:.1f}%)"],
-                    textposition="outside", textfont=dict(color="#e8eaf0"),
+                    textposition="outside", textfont=dict(color="#edf0f5"),
                 ))
                 bar_fig.update_layout(
                     paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                    font=dict(color="#e8eaf0", family="DM Sans"),
+                    font=dict(color="#edf0f5", family="DM Sans"),
                     height=80, margin=dict(l=0, r=40, t=8, b=8),
-                    xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, zerolinecolor="#2a2f4a"),
+                    xaxis=dict(showticklabels=False, showgrid=False, zeroline=False, zerolinecolor="#262c3a"),
                     yaxis=dict(showticklabels=False),
                 )
                 st.plotly_chart(bar_fig, use_container_width=True)
@@ -467,7 +469,7 @@ if page == "📊 Tổng Quan":
                 z=norm.values,
                 x=[FEATURE_NAMES_VN.get(c, c) for c in norm.columns],
                 y=[personas.get(int(i), {}).get("name", f"Cluster {i}") for i in norm.index],
-                colorscale=[[0, "#1c2035"], [0.5, "#6c63ff"], [1, "#ff6584"]],
+                colorscale=[[0, "#171c28"], [0.5, "#7c8aff"], [1, "#ff8fa3"]],
                 text=np.round(cluster_means.values, 1),
                 texttemplate="%{text:.0f}",
                 textfont=dict(size=10),
@@ -524,8 +526,8 @@ elif page == "🔍 Khám Phá Phân Khúc":
             height=480,
             polar=dict(
                 bgcolor="rgba(0,0,0,0)",
-                radialaxis=dict(visible=True, range=[0, 1], gridcolor="#2a2f4a", color="#8890a8"),
-                angularaxis=dict(gridcolor="#2a2f4a", color="#e8eaf0"),
+                radialaxis=dict(visible=True, range=[0, 1], gridcolor="#262c3a", color="#8894a8"),
+                angularaxis=dict(gridcolor="#262c3a", color="#edf0f5"),
             ),
             legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
         )
@@ -606,6 +608,116 @@ elif page == "🔍 Khám Phá Phân Khúc":
 
 
 # ─────────────────────────────────────────────
+# ══ PAGE: SO SÁNH K=3 vs K=4 ══
+# ─────────────────────────────────────────────
+elif page == "⚖️ So Sánh K=3 vs K=4":
+    st.markdown("# ⚖️ So Sánh K=3 vs K=4")
+    render_page_hero(
+        "Algorithm Comparison",
+        "K=3 tách thành K=4 như thế nào?",
+        "Trang này trực quan hóa việc tăng số phân khúc từ 3 lên 4 đã tách nhỏ nhóm nào, giúp lý giải lựa chọn K=4 làm kết quả chính thức của luận văn.",
+        ["Sankey flow", "So sánh song song", "Segment migration"],
+    )
+
+    merged_k3 = merge_clusters(features_df, data.get("clusters_k3"), 3)
+    merged_k4 = merge_clusters(features_df, data.get("clusters_k4"), 4)
+
+    if merged_k3 is None or merged_k4 is None:
+        st.warning("Cần cả dữ liệu K=3 và K=4 để so sánh. Hãy đảm bảo cả hai file CSV đều tồn tại.")
+        st.stop()
+
+    combo = merged_k3[["Cluster_3"]].join(merged_k4[["Cluster_4"]], how="inner").dropna()
+    combo["Cluster_3"] = combo["Cluster_3"].astype(int)
+    combo["Cluster_4"] = combo["Cluster_4"].astype(int)
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Số khách hàng chung", f"{len(combo):,}")
+    with col2:
+        st.metric("Số phân khúc K=3", 3)
+    with col3:
+        st.metric("Số phân khúc K=4", 4)
+
+    st.markdown("---")
+    st.markdown("### Luồng di chuyển khách hàng: K=3 → K=4")
+
+    k3_ids = sorted(SEGMENT_PERSONAS_K3.keys())
+    k4_ids = sorted(SEGMENT_PERSONAS_K4.keys())
+    labels = [f"K3 · {SEGMENT_PERSONAS_K3[i]['name']}" for i in k3_ids] + \
+             [f"K4 · {SEGMENT_PERSONAS_K4[i]['name']}" for i in k4_ids]
+    node_colors = [SEGMENT_PERSONAS_K3[i]["color"] for i in k3_ids] + \
+                  [SEGMENT_PERSONAS_K4[i]["color"] for i in k4_ids]
+
+    sources, targets, values, link_colors = [], [], [], []
+    for k3_id in k3_ids:
+        for k4_id in k4_ids:
+            count = int(((combo["Cluster_3"] == k3_id) & (combo["Cluster_4"] == k4_id)).sum())
+            if count > 0:
+                sources.append(k3_ids.index(k3_id))
+                targets.append(len(k3_ids) + k4_ids.index(k4_id))
+                values.append(count)
+                h = SEGMENT_PERSONAS_K4[k4_id]["color"].lstrip("#")
+                r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+                link_colors.append(f"rgba({r},{g},{b},0.45)")
+
+    fig_sankey = go.Figure(go.Sankey(
+        node=dict(label=labels, color=node_colors, pad=20, thickness=22,
+                  line=dict(color="#262c3a", width=1)),
+        link=dict(source=sources, target=targets, value=values, color=link_colors),
+    ))
+    fig_sankey.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#edf0f5", family="DM Sans", size=12),
+        height=460, margin=dict(l=10, r=10, t=20, b=10),
+    )
+    st.plotly_chart(fig_sankey, use_container_width=True)
+    st.caption("Độ rộng luồng thể hiện số khách hàng di chuyển từ phân khúc K=3 sang phân khúc K=4 tương ứng.")
+
+    st.markdown("---")
+    col_k3, col_k4 = st.columns(2)
+    with col_k3:
+        st.markdown("#### Phân bố K=3")
+        sizes3 = combo["Cluster_3"].value_counts().sort_index()
+        fig_p3 = go.Figure(go.Pie(
+            labels=[SEGMENT_PERSONAS_K3[i]["name"] for i in sizes3.index],
+            values=sizes3.values,
+            marker_colors=[SEGMENT_PERSONAS_K3[i]["color"] for i in sizes3.index],
+            hole=0.5, textinfo="label+percent", textfont=dict(size=10),
+        ))
+        fig_p3.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False)
+        st.plotly_chart(fig_p3, use_container_width=True)
+    with col_k4:
+        st.markdown("#### Phân bố K=4")
+        sizes4 = combo["Cluster_4"].value_counts().sort_index()
+        fig_p4 = go.Figure(go.Pie(
+            labels=[SEGMENT_PERSONAS_K4[i]["name"] for i in sizes4.index],
+            values=sizes4.values,
+            marker_colors=[SEGMENT_PERSONAS_K4[i]["color"] for i in sizes4.index],
+            hole=0.5, textinfo="label+percent", textfont=dict(size=10),
+        ))
+        fig_p4.update_layout(**PLOTLY_LAYOUT, height=320, showlegend=False)
+        st.plotly_chart(fig_p4, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### Nhận xét")
+    crosstab = pd.crosstab(combo["Cluster_3"], combo["Cluster_4"])
+    any_insight = False
+    for k3_id in crosstab.index:
+        row = crosstab.loc[k3_id]
+        row_nonzero = row[row > 0]
+        if len(row_nonzero) > 1:
+            any_insight = True
+            k3_name = SEGMENT_PERSONAS_K3[int(k3_id)]["name"]
+            splits_desc = ", ".join(
+                f"**{SEGMENT_PERSONAS_K4[int(k4_id)]['name']}** ({cnt:,} KH)"
+                for k4_id, cnt in row_nonzero.items()
+            )
+            st.markdown(f"- Nhóm **{k3_name}** (K=3) được tách thành: {splits_desc}")
+    if not any_insight:
+        st.info("Mỗi phân khúc K=3 ánh xạ gần như trọn vẹn sang một phân khúc K=4 tương ứng, không có sự tách nhóm rõ rệt.")
+
+
+# ─────────────────────────────────────────────
 # ══ PAGE: PHÂN TÍCH RFM ══
 # ─────────────────────────────────────────────
 elif page == "📈 Phân Tích RFM":
@@ -633,7 +745,7 @@ elif page == "📈 Phân Tích RFM":
             st.markdown("#### Doanh thu hàng ngày")
             daily = cleaned_df.groupby(cleaned_df["InvoiceDate"].dt.date)["TotalPrice"].sum().reset_index()
             daily.columns = ["Date", "Revenue"]
-            fig_daily = px.line(daily, x="Date", y="Revenue", color_discrete_sequence=["#6c63ff"])
+            fig_daily = px.line(daily, x="Date", y="Revenue", color_discrete_sequence=["#7c8aff"])
             fig_daily.update_layout(**PLOTLY_LAYOUT, height=300, xaxis_title="Ngày", yaxis_title="Doanh thu (GBP)")
             st.plotly_chart(fig_daily, use_container_width=True)
 
@@ -641,7 +753,7 @@ elif page == "📈 Phân Tích RFM":
             st.markdown("#### Doanh thu hàng tháng")
             monthly = cleaned_df.groupby(cleaned_df["InvoiceDate"].dt.to_period("M").astype(str))["TotalPrice"].sum().reset_index()
             monthly.columns = ["Month", "Revenue"]
-            fig_monthly = px.bar(monthly, x="Month", y="Revenue", color_discrete_sequence=["#ff6584"])
+            fig_monthly = px.bar(monthly, x="Month", y="Revenue", color_discrete_sequence=["#ff8fa3"])
             fig_monthly.update_layout(**PLOTLY_LAYOUT, height=300, xaxis_tickangle=-45)
             st.plotly_chart(fig_monthly, use_container_width=True)
 
@@ -659,7 +771,7 @@ elif page == "📈 Phân Tích RFM":
             z=heatmap_data.values,
             x=[f"{h}:00" for h in heatmap_data.columns],
             y=[day_labels[d] if d < len(day_labels) else str(d) for d in heatmap_data.index],
-            colorscale=[[0, "#1c2035"], [0.5, "#6c63ff"], [1, "#ff6584"]],
+            colorscale=[[0, "#171c28"], [0.5, "#7c8aff"], [1, "#ff8fa3"]],
         ))
         fig_heat.update_layout(**PLOTLY_LAYOUT, height=280, xaxis_title="Giờ trong ngày", yaxis_title="")
         st.plotly_chart(fig_heat, use_container_width=True)
@@ -673,7 +785,7 @@ elif page == "📈 Phân Tích RFM":
             top_qty = cleaned_df.groupby("Description")["Quantity"].sum().sort_values(ascending=False).head(top_n)
             fig_qty = px.bar(
                 x=top_qty.values, y=top_qty.index, orientation="h",
-                color_discrete_sequence=["#6c63ff"],
+                color_discrete_sequence=["#7c8aff"],
                 labels={"x": "Số lượng", "y": ""},
             )
             fig_qty.update_layout(**PLOTLY_LAYOUT, height=400)
@@ -684,7 +796,7 @@ elif page == "📈 Phân Tích RFM":
             top_rev = cleaned_df.groupby("Description")["TotalPrice"].sum().sort_values(ascending=False).head(top_n)
             fig_rev = px.bar(
                 x=top_rev.values, y=top_rev.index, orientation="h",
-                color_discrete_sequence=["#ff6584"],
+                color_discrete_sequence=["#ff8fa3"],
                 labels={"x": "Doanh thu (GBP)", "y": ""},
             )
             fig_rev.update_layout(**PLOTLY_LAYOUT, height=400)
@@ -694,14 +806,14 @@ elif page == "📈 Phân Tích RFM":
         st.markdown("#### Phân phối số giao dịch / khách hàng")
         txn_per_cust = cleaned_df.groupby("CustomerID")["InvoiceNo"].nunique()
         fig_hist = px.histogram(txn_per_cust[txn_per_cust <= txn_per_cust.quantile(0.99)],
-                                nbins=40, color_discrete_sequence=["#43e97b"])
+                                nbins=40, color_discrete_sequence=["#5eb8ff"])
         fig_hist.update_layout(**PLOTLY_LAYOUT, height=300, xaxis_title="Số giao dịch", yaxis_title="Số khách hàng")
         st.plotly_chart(fig_hist, use_container_width=True)
 
         st.markdown("#### Phân phối tổng chi tiêu / khách hàng")
         spend_per_cust = cleaned_df.groupby("CustomerID")["TotalPrice"].sum()
         fig_spend = px.histogram(spend_per_cust[spend_per_cust <= spend_per_cust.quantile(0.99)],
-                                 nbins=40, color_discrete_sequence=["#f7971e"])
+                                 nbins=40, color_discrete_sequence=["#e8825a"])
         fig_spend.update_layout(**PLOTLY_LAYOUT, height=300, xaxis_title="Tổng chi tiêu (GBP)", yaxis_title="Số khách hàng")
         st.plotly_chart(fig_spend, use_container_width=True)
 
@@ -771,13 +883,13 @@ elif page == "🧭 Không Gian PCA":
         fig_3d.update_layout(
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)",
-            font=dict(color="#e8eaf0"),
+            font=dict(color="#edf0f5"),
             height=520,
             scene=dict(
                 bgcolor="rgba(0,0,0,0)",
-                xaxis=dict(title="PC1", gridcolor="#2a2f4a", color="#8890a8"),
-                yaxis=dict(title="PC2", gridcolor="#2a2f4a", color="#8890a8"),
-                zaxis=dict(title="PC3", gridcolor="#2a2f4a", color="#8890a8"),
+                xaxis=dict(title="PC1", gridcolor="#262c3a", color="#8894a8"),
+                yaxis=dict(title="PC2", gridcolor="#262c3a", color="#8894a8"),
+                zaxis=dict(title="PC3", gridcolor="#262c3a", color="#8894a8"),
             ),
             legend=dict(orientation="h", y=-0.05),
         )
@@ -789,14 +901,14 @@ elif page == "🧭 Không Gian PCA":
         fig_var = go.Figure()
         fig_var.add_trace(go.Bar(
             x=list(range(1, len(full_evr) + 1)), y=full_evr,
-            name="Phương sai riêng lẻ", marker_color="#6c63ff", opacity=0.8,
+            name="Phương sai riêng lẻ", marker_color="#7c8aff", opacity=0.8,
         ))
         fig_var.add_trace(go.Scatter(
             x=list(range(1, len(cum_evr) + 1)), y=cum_evr,
-            name="Phương sai tích lũy", line=dict(color="#ff6584", width=2), mode="lines+markers",
+            name="Phương sai tích lũy", line=dict(color="#ff8fa3", width=2), mode="lines+markers",
         ))
-        fig_var.add_hline(y=0.8, line_dash="dash", line_color="#43e97b", annotation_text="80%")
-        fig_var.add_hline(y=0.9, line_dash="dash", line_color="#f7971e", annotation_text="90%")
+        fig_var.add_hline(y=0.8, line_dash="dash", line_color="#5eb8ff", annotation_text="80%")
+        fig_var.add_hline(y=0.9, line_dash="dash", line_color="#e8825a", annotation_text="90%")
         fig_var.update_layout(**PLOTLY_LAYOUT, height=380,
                               xaxis_title="Thành phần chính", yaxis_title="Tỷ lệ phương sai",
                               legend=dict(orientation="h", y=-0.15))
@@ -839,7 +951,7 @@ elif page == "🏆 Xếp Hạng Khách Hàng":
             lambda x: personas.get(int(x), {}).get("name", f"Cluster {x}") if pd.notna(x) else "N/A"
         )
         rank_df["Màu"] = rank_df[cluster_col].apply(
-            lambda x: colors.get(int(x), "#8890a8") if pd.notna(x) else "#8890a8"
+            lambda x: colors.get(int(x), "#8894a8") if pd.notna(x) else "#8894a8"
         )
 
         # Controls
@@ -904,12 +1016,12 @@ elif page == "🏆 Xếp Hạng Khách Hàng":
             prefix = "£" if "Price" in sort_col or "price" in sort_col else ""
             fig_rank.update_layout(
                 paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="#e8eaf0", family="DM Sans"),
+                font=dict(color="#edf0f5", family="DM Sans"),
                 margin=dict(l=40, r=20, t=40, b=40),
                 height=420,
                 barmode="stack",
-                xaxis=dict(showticklabels=False, title="Customer ID", gridcolor="#2a2f4a", zerolinecolor="#2a2f4a"),
-                yaxis=dict(title=f"{prefix}{sort_feature_label}", gridcolor="#2a2f4a", zerolinecolor="#2a2f4a"),
+                xaxis=dict(showticklabels=False, title="Customer ID", gridcolor="#262c3a", zerolinecolor="#262c3a"),
+                yaxis=dict(title=f"{prefix}{sort_feature_label}", gridcolor="#262c3a", zerolinecolor="#262c3a"),
                 legend=dict(orientation="h", y=-0.12, x=0.5, xanchor="center"),
             )
             st.plotly_chart(fig_rank, use_container_width=True)
@@ -967,7 +1079,7 @@ elif page == "🏆 Xếp Hạng Khách Hàng":
             (i for i in sorted(merged_df[cluster_col].dropna().unique().astype(int))
              if personas.get(i, {}).get("name") == selected_seg), 0
         )
-        seg_color = colors.get(seg_cid, "#6c63ff")
+        seg_color = colors.get(seg_cid, "#7c8aff")
 
         # KPI row cho phân khúc đó
         c1, c2, c3, c4 = st.columns(4)
@@ -1063,17 +1175,17 @@ elif page == "👤 Tra Cứu Khách Hàng":
             st.stop()
 
         cid_int = int(row[cluster_col]) if pd.notna(row[cluster_col]) else -1
-        persona = personas.get(cid_int, {"name": "Unknown", "color": "#8890a8", "desc": ""})
+        persona = personas.get(cid_int, {"name": "Unknown", "color": "#8894a8", "desc": ""})
 
         st.markdown(
             f"""<div class='metric-card' style='border-left:4px solid {persona["color"]};margin-bottom:24px'>
-                <div style='font-family:Space Mono,monospace;font-size:0.75rem;color:#8890a8;margin-bottom:4px'>CUSTOMER ID</div>
+                <div style='font-family:Space Mono,monospace;font-size:0.75rem;color:#8894a8;margin-bottom:4px'>CUSTOMER ID</div>
                 <div style='font-family:Space Mono,monospace;font-size:1.8rem;font-weight:700'>{selected_customer}</div>
                 <div style='margin-top:8px'>
                   <span class='cluster-badge' style='background:{persona["color"]}22;color:{persona["color"]};border:1px solid {persona["color"]}44'>
                     {persona["name"]}
                   </span>
-                  <span style='color:#8890a8;font-size:0.82rem;margin-left:10px'>{persona["desc"]}</span>
+                  <span style='color:#8894a8;font-size:0.82rem;margin-left:10px'>{persona["desc"]}</span>
                 </div>
             </div>""",
             unsafe_allow_html=True,
@@ -1118,7 +1230,7 @@ elif page == "👤 Tra Cứu Khách Hàng":
                 fig_cust_radar = go.Figure()
                 for norm_vals, trace_name, color, opacity in [
                     (cust_norm.tolist(), f"KH {selected_customer}", persona["color"], 0.3),
-                    (cl_norm.tolist(), "TB Phân khúc", "#8890a8", 0.1),
+                    (cl_norm.tolist(), "TB Phân khúc", "#8894a8", 0.1),
                 ]:
                     h = color.lstrip("#")
                     rc, gc, bc = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
@@ -1134,8 +1246,8 @@ elif page == "👤 Tra Cứu Khách Hàng":
                     **PLOTLY_LAYOUT, height=340,
                     polar=dict(
                         bgcolor="rgba(0,0,0,0)",
-                        radialaxis=dict(visible=True, range=[0, 1], gridcolor="#2a2f4a", color="#8890a8"),
-                        angularaxis=dict(gridcolor="#2a2f4a", color="#e8eaf0"),
+                        radialaxis=dict(visible=True, range=[0, 1], gridcolor="#262c3a", color="#8894a8"),
+                        angularaxis=dict(gridcolor="#262c3a", color="#edf0f5"),
                     ),
                     legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
                 )
@@ -1159,7 +1271,7 @@ elif page == "👤 Tra Cứu Khách Hàng":
             fig_cmp.add_trace(go.Bar(name=f"KH {selected_customer}", x=compare_norm["Feature"],
                                      y=compare_norm["Khách hàng"], marker_color=persona["color"], opacity=0.85))
             fig_cmp.add_trace(go.Bar(name="TB Phân khúc", x=compare_norm["Feature"],
-                                     y=compare_norm["TB Phân khúc"], marker_color="#8890a8", opacity=0.6))
+                                     y=compare_norm["TB Phân khúc"], marker_color="#8894a8", opacity=0.6))
             fig_cmp.update_layout(**PLOTLY_LAYOUT, height=340, barmode="group",
                                   xaxis_tickangle=-35, legend=dict(orientation="h", y=-0.25))
             st.plotly_chart(fig_cmp, use_container_width=True)
@@ -1184,3 +1296,108 @@ elif page == "👤 Tra Cứu Khách Hàng":
                 )
             else:
                 st.info("Không tìm thấy lịch sử giao dịch cho khách hàng này.")
+
+# ─────────────────────────────────────────────
+# ══ PAGE: MÔ PHỎNG KHÁCH HÀNG ══
+# ─────────────────────────────────────────────
+elif page == "🧪 Mô Phỏng Khách Hàng":
+    st.markdown("# 🧪 Mô Phỏng Khách Hàng")
+    render_page_hero(
+        "What-If Simulator",
+        "Một khách hàng giả định sẽ thuộc phân khúc nào?",
+        "Điều chỉnh chỉ số hành vi mua hàng để xem khách hàng giả định gần với phân khúc nào nhất. Công cụ minh họa nhanh dùng khoảng cách chuẩn hóa tới tâm cụm — không phải mô hình K-Means chính thức đã huấn luyện trong notebook.",
+        ["Interactive sliders", "Nearest-centroid", "Radar so sánh"],
+    )
+
+    if merged_df is None or cluster_col not in merged_df.columns:
+        st.warning("Không có dữ liệu cluster.")
+        st.stop()
+
+    sim_features = ["Sum_Quantity", "Mean_UnitPrice", "Sum_TotalPrice", "Count_Invoice", "Count_Stock"]
+    sim_features = [f for f in sim_features if f in merged_df.columns]
+
+    st.markdown("### Nhập chỉ số khách hàng giả định")
+    sim_cols = st.columns(len(sim_features))
+    sim_input = {}
+    for col, feat in zip(sim_cols, sim_features):
+        with col:
+            series = merged_df[feat].dropna()
+            lo, hi = float(series.quantile(0.01)), float(series.quantile(0.99))
+            default = float(series.median())
+            sim_input[feat] = st.slider(
+                FEATURE_NAMES_VN.get(feat, feat),
+                min_value=lo, max_value=hi, value=default,
+                key=f"sim_{feat}",
+            )
+
+    # Chuẩn hóa bằng mean/std của chính bộ dữ liệu (xấp xỉ scaler đã dùng trong notebook)
+    means = merged_df[sim_features].mean()
+    stds = merged_df[sim_features].std().replace(0, 1)
+    input_z = pd.Series({f: (sim_input[f] - means[f]) / stds[f] for f in sim_features})
+
+    cluster_means_raw = merged_df.groupby(cluster_col)[sim_features].mean()
+    cluster_means_z = (cluster_means_raw - means) / stds
+
+    distances = ((cluster_means_z - input_z) ** 2).sum(axis=1).pow(0.5)
+    nearest_cid = int(distances.idxmin())
+    persona_pred = personas.get(nearest_cid, {"name": "Unknown", "color": "#8894a8", "desc": ""})
+
+    st.markdown("---")
+    st.markdown(
+        f"""<div class='metric-card' style='border-left:4px solid {persona_pred["color"]};margin-bottom:16px'>
+            <div style='font-family:Space Mono,monospace;font-size:0.75rem;color:#8894a8;margin-bottom:4px'>PHÂN KHÚC GẦN NHẤT</div>
+            <div class='metric-value' style='color:{persona_pred["color"]};font-size:1.6rem'>{persona_pred["name"]}</div>
+            <div class='metric-label'>{persona_pred["desc"]}</div>
+        </div>""",
+        unsafe_allow_html=True,
+    )
+
+    dist_df = pd.DataFrame({
+        "Phân khúc": [personas.get(int(i), {}).get("name", f"C{i}") for i in distances.index],
+        "Khoảng cách chuẩn hóa": distances.values,
+    }).sort_values("Khoảng cách chuẩn hóa")
+    st.dataframe(dist_df, use_container_width=True, hide_index=True)
+
+    st.markdown("### So sánh với phân khúc dự đoán")
+    global_min_s = merged_df[sim_features].min()
+    global_max_s = merged_df[sim_features].max()
+
+    input_norm = pd.Series({
+        f: (sim_input[f] - global_min_s[f]) / (global_max_s[f] - global_min_s[f] + 1e-9)
+        for f in sim_features
+    })
+    cluster_mean_raw = cluster_means_raw.loc[nearest_cid]
+    cluster_norm = (cluster_mean_raw - global_min_s) / (global_max_s - global_min_s + 1e-9)
+
+    cats_sim = [FEATURE_NAMES_VN.get(f, f) for f in sim_features]
+    fig_sim_radar = go.Figure()
+    for norm_vals, trace_name, color, opacity in [
+        (input_norm.tolist(), "Khách hàng giả định", persona_pred["color"], 0.35),
+        (cluster_norm.tolist(), f"TB {persona_pred['name']}", "#8894a8", 0.1),
+    ]:
+        h = color.lstrip("#")
+        rc, gc, bc = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        vals = norm_vals + norm_vals[:1]
+        c_list = cats_sim + cats_sim[:1]
+        fig_sim_radar.add_trace(go.Scatterpolar(
+            r=vals, theta=c_list, name=trace_name,
+            fill="toself", fillcolor=f"rgba({rc},{gc},{bc},{opacity})",
+            line=dict(color=color, width=2),
+        ))
+    fig_sim_radar.update_layout(
+        **PLOTLY_LAYOUT, height=400,
+        polar=dict(
+            bgcolor="rgba(0,0,0,0)",
+            radialaxis=dict(visible=True, range=[0, 1], gridcolor="#262c3a", color="#8894a8"),
+            angularaxis=dict(gridcolor="#262c3a", color="#edf0f5"),
+        ),
+        legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
+    )
+    st.plotly_chart(fig_sim_radar, use_container_width=True)
+
+    st.caption(
+        "⚠️ Công cụ minh họa dùng khoảng cách Euclidean chuẩn hóa tới tâm cụm trên feature gốc "
+        "(không qua PCA, không dùng đúng Box-Cox/StandardScaler đã huấn luyện trong notebook). "
+        "Kết quả có thể lệch nhẹ so với mô hình K-Means chính thức — phù hợp để minh họa trực quan, "
+        "không dùng làm căn cứ quyết định kinh doanh chính thức."
+    )
