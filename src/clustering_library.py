@@ -21,11 +21,18 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import shap
+# display được dùng trong notebook; fallback sang print nếu IPython không có sẵn.
+try:
+    from IPython.display import display
+except ImportError:
+    display = print
 # Import các công cụ thống kê, đặc biệt Box-Cox để biến đổi phân phối dữ liệu
 from scipy import stats
 from scipy.stats import boxcox
 # Import các thuật toán và thước đo từ scikit-learn phục vụ PCA, clustering và đánh giá mô hình
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.mixture import GaussianMixture
+from sklearn.neighbors import NearestNeighbors
 from sklearn.decomposition import PCA
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix, silhouette_samples, silhouette_score
@@ -89,6 +96,7 @@ class DataCleaner:
             self.df["CustomerID"]
             .astype(str)
             .str.replace(".0", "", regex=False)
+            .replace({"nan": np.nan, "None": np.nan, "": np.nan})
             .str.zfill(6)
         )
 
@@ -259,73 +267,54 @@ class FeatureEngineer:
         pd.DataFrame: Bảng đặc trưng theo từng CustomerID.
         
         """
-        num_customers = self.df["CustomerID"].nunique()
-        # Tạo DataFrame rỗng ban đầu: mỗi dòng tương ứng 1 khách hàng, mỗi cột là 1 feature.
-        self.customer_features = pd.DataFrame(
-            data=np.zeros((num_customers, len(self.feature_customer2)), dtype=float),
-            columns=self.feature_customer2,
-        )
-
-        self.customer_features["CustomerID"] = self.customer_features[
-            "CustomerID"
-        ].astype("object")
-
         print("Đang tính toán features cho từng khách hàng...")
 
-        # Gom dữ liệu theo CustomerID để tính feature riêng cho từng khách hàng.
-        for i, (customer_id, value) in enumerate(self.df.groupby("CustomerID")):
-            # Gán mã khách hàng vào dòng hiện tại
-            self.customer_features.iat[i, 0] = customer_id
+        customer_base = self.df.groupby("CustomerID").agg(
+            Sum_Quantity=("Quantity", "sum"),
+            Mean_UnitPrice=("UnitPrice", "mean"),
+            Mean_TotalPrice=("TotalPrice", "mean"),
+            Sum_TotalPrice=("TotalPrice", "sum"),
+            Count_Invoice=("InvoiceNo", "nunique"),
+            Count_Stock=("StockCode", "nunique"),
+        )
 
-            # 1. Tổng quantity
-            self.customer_features.iat[i, 1] = value.Quantity.sum()
+        invoice_level = (
+            self.df.groupby(["CustomerID", "InvoiceNo"])
+            .agg(
+                InvoiceCountPerInvoice=("InvoiceNo", "size"),
+                Mean_UnitPriceMeanPerInvoice=("UnitPrice", "mean"),
+                Mean_QuantitySumPerInvoice=("Quantity", "sum"),
+                Mean_TotalPriceMeanPerInvoice=("TotalPrice", "mean"),
+                Mean_TotalPriceSumPerInvoice=("TotalPrice", "sum"),
+            )
+            .groupby(level=0)
+            .mean()
+            .rename(columns={"InvoiceCountPerInvoice": "Mean_StockCountPerInvoice"})
+        )
 
-            # 2. Giá trung bình
-            self.customer_features.iat[i, 2] = value.UnitPrice.mean()
+        stock_level = (
+            self.df.groupby(["CustomerID", "StockCode"])
+            .agg(
+                StockCountPerStock=("StockCode", "size"),
+                Mean_UnitPriceMeanPerStock=("UnitPrice", "mean"),
+                Mean_QuantitySumPerStock=("Quantity", "sum"),
+                Mean_TotalPriceMeanPerStock=("TotalPrice", "mean"),
+                Mean_TotalPriceSumPerStock=("TotalPrice", "sum"),
+            )
+            .groupby(level=0)
+            .mean()
+            .rename(columns={"StockCountPerStock": "Mean_InvoiceCountPerStock"})
+        )
 
-            # 3. Giá trị giao dịch trung bình
-            self.customer_features.iat[i, 3] = value.TotalPrice.mean()
+        self.customer_features = (
+            customer_base
+            .join(invoice_level, how="left")
+            .join(stock_level, how="left")
+            .reset_index()
+        )
 
-            # 4. Tổng chi tiêu
-            self.customer_features.iat[i, 4] = value.TotalPrice.sum()
-
-            # 5. Số hóa đơn
-            self.customer_features.iat[i, 5] = value.InvoiceNo.nunique()
-
-            # 6. Số loại sản phẩm
-            self.customer_features.iat[i, 6] = value.StockCode.nunique()
-
-            # 7-16. Các chỉ số hành vi nâng cao theo sản phẩm và theo hóa đơn.
-            # Những feature này giúp mô hình hiểu sâu hơn về cách khách mua hàng, không chỉ tổng chi tiêu.
-            self.customer_features.iat[i, 7] = value.groupby("StockCode").size().mean()
-            self.customer_features.iat[i, 8] = value.groupby("InvoiceNo").size().mean()
-            self.customer_features.iat[i, 9] = (
-                value.groupby("InvoiceNo")["UnitPrice"].mean().mean()
-            )
-            self.customer_features.iat[i, 10] = (
-                value.groupby("InvoiceNo")["Quantity"].sum().mean()
-            )
-            self.customer_features.iat[i, 11] = (
-                value.groupby("InvoiceNo")["TotalPrice"].mean().mean()
-            )
-            self.customer_features.iat[i, 12] = (
-                value.groupby("InvoiceNo")["TotalPrice"].sum().mean()
-            )
-            self.customer_features.iat[i, 13] = (
-                value.groupby("StockCode")["UnitPrice"].mean().mean()
-            )
-            self.customer_features.iat[i, 14] = (
-                value.groupby("StockCode")["Quantity"].sum().mean()
-            )
-            self.customer_features.iat[i, 15] = (
-                value.groupby("StockCode")["TotalPrice"].mean().mean()
-            )
-            self.customer_features.iat[i, 16] = (
-                value.groupby("StockCode")["TotalPrice"].sum().mean()
-            )
-
-            if (i + 1) % 500 == 0:
-                print(f"Đã xử lý {i + 1}/{num_customers} khách hàng...")
+        # Giữ đúng thứ tự cột đã dùng ở các bước sau để notebook và file CSV không đổi cấu trúc.
+        self.customer_features = self.customer_features[self.feature_customer2]
 
         print("✓ Hoàn thành tính toán features!")
         return self.customer_features
@@ -549,6 +538,20 @@ class ClusterAnalyzer:
         self.surrogate_models = {}
         self.shap_results = {}
 
+    def _get_pca_feature_matrix(self):
+        """
+        Trả về chỉ các cột PCA thuần túy, bỏ qua các cột nhãn cluster nếu đã được gắn thêm.
+
+        Một số hàm trong notebook thêm cột Cluster_* vào df_pca để vẽ biểu đồ.
+        Nếu dùng toàn bộ df_pca cho metric/clustering sau đó, các cột nhãn này sẽ
+        làm sai lệch kết quả. Helper này giữ cho các phép tính chỉ chạy trên PC.
+        """
+        if self.df_pca is None:
+            raise ValueError("PCA data not found. Run apply_pca() first.")
+
+        pca_columns = [col for col in self.df_pca.columns if col.startswith("PC")]
+        return self.df_pca[pca_columns]
+
     def load_data(self):
         """
         Đọc dữ liệu feature đã scale và feature gốc.
@@ -565,21 +568,34 @@ class ClusterAnalyzer:
 
         return self.df_scaled, self.df_original
 
-    def apply_pca(self, n_components=None):
+    def apply_pca(self, n_components=None, variance_threshold=0.85):
         """
         Áp dụng PCA để giảm chiều dữ liệu.
-        
+
         PCA giúp nén nhiều features về một số trục chính, thường dùng để:
+        - Khử multicollinearity trước khi clustering.
         - Vẽ dữ liệu 2D/3D dễ quan sát hơn.
         - Xem các chiều chính giải thích được bao nhiêu phương sai.
-        
+
         Args:
-        n_components (int): Số thành phần chính muốn giữ lại. Nếu None thì giữ tối đa.
-        
+        n_components (int): Số thành phần chính muốn giữ lại. Nếu None thì tự
+            động chọn dựa trên variance_threshold.
+        variance_threshold (float): Ngưỡng phương sai tích lũy tối thiểu cần
+            giữ lại (mặc định 0.85). Chỉ dùng khi n_components=None.
+
         Returns:
         pd.DataFrame: Dữ liệu sau khi biến đổi PCA.
-        
+
         """
+        if n_components is None:
+            # Chạy PCA toàn bộ trước để tính cumulative variance, từ đó chọn
+            # số components tối thiểu đạt ngưỡng variance_threshold.
+            pca_full = PCA().fit(self.df_scaled)
+            cumvar = np.cumsum(pca_full.explained_variance_ratio_)
+            n_components = int(np.argmax(cumvar >= variance_threshold)) + 1
+            print(f"Tự động chọn {n_components} components "
+                  f"(giữ lại {cumvar[n_components - 1]:.1%} variance ≥ {variance_threshold:.0%})")
+
         # PCA học các trục chính từ dữ liệu đã scale rồi chiếu dữ liệu sang không gian mới.
         self.pca = PCA(n_components=n_components)
         pca_features = self.pca.fit_transform(self.df_scaled)
@@ -647,14 +663,15 @@ class ClusterAnalyzer:
         # inertia đo tổng khoảng cách trong cụm; silhouette đo mức độ tách biệt giữa các cụm.
         inertias = []
         silhouette_scores = []
+        pca_data = self._get_pca_feature_matrix()
 
-        # Thử từng giá trị k để so sánh chất lượng phân cụm.
+        # Thử từng giá trị k để so sánh chất lượng phân cụm trên PCA data.
         for k in k_range:
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-            labels = kmeans.fit_predict(self.df_scaled)
+            labels = kmeans.fit_predict(pca_data)
 
             inertias.append(kmeans.inertia_)
-            silhouette_scores.append(silhouette_score(self.df_scaled, labels))
+            silhouette_scores.append(silhouette_score(pca_data, labels))
 
         self.optimal_clusters = {
             "k_range": list(k_range),
@@ -731,9 +748,11 @@ class ClusterAnalyzer:
         dict: Kết quả phân cụm, kích thước cụm và trung bình feature theo cụm.
         
         """
+        pca_data = self._get_pca_feature_matrix()
+
         for k in k_values:
             kmeans = KMeans(n_clusters=k, random_state=42, n_init=10)
-            clusters = kmeans.fit_predict(self.df_scaled)
+            clusters = kmeans.fit_predict(pca_data)  # chạy trên PCA data
 
             # Thêm nhãn cụm vào cả dữ liệu scaled, PCA và original để tiện vẽ biểu đồ/giải thích.
             cluster_col = f"Cluster_{k}"
@@ -741,10 +760,12 @@ class ClusterAnalyzer:
             self.df_pca[cluster_col] = clusters
             self.df_original[cluster_col] = clusters
 
+            feature_cols = [col for col in self.df_original.columns if not col.startswith("Cluster_")]
+
             self.cluster_results[k] = {
                 "labels": clusters,
                 "sizes": pd.Series(clusters).value_counts().sort_index(),
-                "means": self.df_original.groupby(cluster_col).mean(),
+                "means": self.df_original[feature_cols].groupby(self.df_original[cluster_col]).mean(),
             }
 
             print(f"Kích thước clusters (k={k}):")
@@ -1049,115 +1070,131 @@ class ClusterAnalyzer:
         plt.tight_layout()
         plt.show()
 
-    # def train_surrogate_model(self, k):
-    #     """
-    #     Huấn luyện mô hình RandomForest để mô phỏng kết quả phân cụm của K-Means.
+    def train_surrogate_model(self, k):
+        """
+        Huấn luyện mô hình RandomForest để mô phỏng kết quả phân cụm của K-Means.
         
-    #     Vì K-Means khó giải thích trực tiếp bằng SHAP, ta dùng RandomForest học lại
-    #     nhãn cụm của K-Means. Nếu RandomForest dự đoán lại nhãn cụm đủ tốt, ta có
-    #     thể dùng SHAP trên RandomForest để hiểu feature nào ảnh hưởng đến từng cụm.
+        Vì K-Means khó giải thích trực tiếp bằng SHAP, ta dùng RandomForest học lại
+        nhãn cụm của K-Means. Nếu RandomForest dự đoán lại nhãn cụm đủ tốt, ta có
+        thể dùng SHAP trên RandomForest để hiểu feature nào ảnh hưởng đến từng cụm.
         
-    #     Args:
-    #     k (int): Số cụm cần giải thích.
+        Args:
+        k (int): Số cụm cần giải thích.
         
-    #     Returns:
-    #     dict: Mô hình thay thế và các chỉ số đánh giá như accuracy, confusion matrix.
+        Returns:
+        dict: Mô hình thay thế và các chỉ số đánh giá như accuracy, confusion matrix.
         
-    #     """
-    #     if k not in self.cluster_results:
-    #         raise ValueError(f"Cluster results for k={k} not found. Run apply_kmeans first.")
-        
-    #     # Lấy tất cả cột không phải là Cluster_
-    #     feature_cols = [col for col in self.df_scaled.columns if not col.startswith('Cluster_')]
-    #     X = self.df_scaled[feature_cols].values
-    #     y = self.cluster_results[k]['labels']
-        
-    #     # Huấn luyện mô hình RandomForest classifier
-    #     rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
-    #     rf_model.fit(X, y)
-        
-    #     # Dự đoán lại nhãn cụm bằng mô hình thay thế
-    #     y_pred = rf_model.predict(X)
-        
-    #     # Tính các chỉ số để xem RandomForest mô phỏng K-Means tốt đến đâu
-    #     accuracy = accuracy_score(y, y_pred)
-    #     conf_matrix = confusion_matrix(y, y_pred)
-        
-    #     # Lưu model, metric và thông tin feature để dùng ở bước SHAP
-    #     self.surrogate_models[k] = {
-    #         'model': rf_model,
-    #         'accuracy': accuracy,
-    #         'confusion_matrix': conf_matrix,
-    #         'feature_names': feature_cols
-    #     }
-        
-    #     # In báo cáo kết quả huấn luyện mô hình thay thế
-    #     print(f"=== HUẤN LUYỆN MÔ HÌNH THAY THẾ (k={k}) ===")
-    #     print(f"Độ chính xác: {accuracy:.4f} ({accuracy*100:.2f}%)")
-    #     print(f"\nConfusion Matrix:")
-    #     print(conf_matrix)
-    #     print(f"\nMô hình có thể dự đoán {'CHÍNH XÁC' if accuracy >= 0.95 else 'HỢP LÝ'} các phân cụm.")
-        
-    #     return self.surrogate_models[k]
-    def train_surrogate_model(self, k, test_size=0.2):
+        """
         if k not in self.cluster_results:
-            raise ValueError(f"Cluster results for k={k} not found.")
-
-        feature_cols = [col for col in self.df_scaled.columns 
-                        if not col.startswith('Cluster_')]
+            raise ValueError(f"Cluster results for k={k} not found. Run apply_kmeans first.")
+        
+        # Lấy tất cả cột không phải là Cluster_
+        feature_cols = [col for col in self.df_scaled.columns if not col.startswith('Cluster_')]
         X = self.df_scaled[feature_cols].values
         y = self.cluster_results[k]['labels']
 
-        # ✅ Split trước khi train
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42, stratify=y
-        )
-
-        # ✅ Giới hạn depth để tránh memorize
-        rf_model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,        # thêm dòng này
+            X,
+            y,
+            test_size=0.2,
             random_state=42,
-            n_jobs=-1
+            stratify=y,
         )
-
-        # ✅ Cross-validation để đánh giá robust hơn
-        cv_scores = cross_val_score(rf_model, X_train, y_train, cv=5)
         
-        # Train final model trên toàn bộ X để SHAP dùng full data
-        rf_model.fit(X, y)
-
-        # ✅ Evaluate trên test set
+        # Huấn luyện mô hình RandomForest classifier
+        rf_model = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+        rf_model.fit(X_train, y_train)
+        
+        # Dự đoán lại nhãn cụm bằng mô hình thay thế
+        y_pred_train = rf_model.predict(X_train)
         y_pred_test = rf_model.predict(X_test)
+        
+        # Tính các chỉ số để xem RandomForest mô phỏng K-Means tốt đến đâu
+        train_accuracy = accuracy_score(y_train, y_pred_train)
         test_accuracy = accuracy_score(y_test, y_pred_test)
-        train_accuracy = accuracy_score(y, rf_model.predict(X))
-
         conf_matrix = confusion_matrix(y_test, y_pred_test)
 
+        # Refit trên toàn bộ dữ liệu để SHAP giải thích cùng một surrogate model.
+        rf_model.fit(X, y)
+        
+        # Lưu model, metric và thông tin feature để dùng ở bước SHAP
         self.surrogate_models[k] = {
             'model': rf_model,
+            'accuracy': test_accuracy,
             'train_accuracy': train_accuracy,
             'test_accuracy': test_accuracy,
-            'cv_scores': cv_scores,
             'confusion_matrix': conf_matrix,
             'feature_names': feature_cols
         }
-
-        print(f"=== SURROGATE MODEL (k={k}) ===")
-        print(f"Train accuracy : {train_accuracy*100:.2f}%")
-        print(f"Test accuracy  : {test_accuracy*100:.2f}%")   # ← con số này mới quan trọng
-        print(f"CV scores      : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
-        print(f"\nConfusion Matrix (test set):")
+        
+        # In báo cáo kết quả huấn luyện mô hình thay thế
+        print(f"=== HUẤN LUYỆN MÔ HÌNH THAY THẾ (k={k}) ===")
+        print(f"Độ chính xác train: {train_accuracy:.4f} ({train_accuracy*100:.2f}%)")
+        print(f"Độ chính xác test  : {test_accuracy:.4f} ({test_accuracy*100:.2f}%)")
+        print(f"\nConfusion Matrix:")
         print(conf_matrix)
-
-        # ✅ Cảnh báo nếu overfit
-        gap = train_accuracy - test_accuracy
-        if gap > 0.05:
-            print(f"\n⚠️  Overfit gap: {gap:.2%} — cân nhắc tăng max_depth hoặc min_samples_leaf")
-        else:
-            print(f"\n✅ Model ổn định (gap = {gap:.2%})")
-
+        print(f"\nMô hình có thể dự đoán {'CHÍNH XÁC' if test_accuracy >= 0.95 else 'HỢP LÝ'} các phân cụm.")
+        
         return self.surrogate_models[k]
+    # def train_surrogate_model(self, k, test_size=0.2):
+    #     if k not in self.cluster_results:
+    #         raise ValueError(f"Cluster results for k={k} not found.")
+
+    #     feature_cols = [col for col in self.df_scaled.columns 
+    #                     if not col.startswith('Cluster_')]
+    #     X = self.df_scaled[feature_cols].values
+    #     y = self.cluster_results[k]['labels']
+
+    #     # ✅ Split trước khi train
+    #     X_train, X_test, y_train, y_test = train_test_split(
+    #         X, y, test_size=test_size, random_state=42, stratify=y
+    #     )
+
+    #     # ✅ Giới hạn depth để tránh memorize
+    #     rf_model = RandomForestClassifier(
+    #         n_estimators=100,
+    #         max_depth=10,        # thêm dòng này
+    #         random_state=42,
+    #         n_jobs=-1
+    #     )
+
+    #     # ✅ Cross-validation để đánh giá robust hơn
+    #     cv_scores = cross_val_score(rf_model, X_train, y_train, cv=5)
+        
+    #     # Train final model trên toàn bộ X để SHAP dùng full data
+    #     rf_model.fit(X, y)
+
+    #     # ✅ Evaluate trên test set
+    #     y_pred_test = rf_model.predict(X_test)
+    #     test_accuracy = accuracy_score(y_test, y_pred_test)
+    #     train_accuracy = accuracy_score(y, rf_model.predict(X))
+
+    #     conf_matrix = confusion_matrix(y_test, y_pred_test)
+
+    #     self.surrogate_models[k] = {
+    #         'model': rf_model,
+    #         'train_accuracy': train_accuracy,
+    #         'test_accuracy': test_accuracy,
+    #         'cv_scores': cv_scores,
+    #         'confusion_matrix': conf_matrix,
+    #         'feature_names': feature_cols
+    #     }
+
+    #     print(f"=== SURROGATE MODEL (k={k}) ===")
+    #     print(f"Train accuracy : {train_accuracy*100:.2f}%")
+    #     print(f"Test accuracy  : {test_accuracy*100:.2f}%")   # ← con số này mới quan trọng
+    #     print(f"CV scores      : {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    #     print(f"\nConfusion Matrix (test set):")
+    #     print(conf_matrix)
+
+    #     # ✅ Cảnh báo nếu overfit
+    #     gap = train_accuracy - test_accuracy
+    #     if gap > 0.05:
+    #         print(f"\n⚠️  Overfit gap: {gap:.2%} — cân nhắc tăng max_depth hoặc min_samples_leaf")
+    #     else:
+    #         print(f"\n✅ Model ổn định (gap = {gap:.2%})")
+
+    #     return self.surrogate_models[k]
 
     def calculate_shap_values(self, k):
         """
@@ -1172,35 +1209,39 @@ class ClusterAnalyzer:
         """
         if k not in self.surrogate_models:
             raise ValueError(f"Mô hình thay thế cho k={k} không tìm thấy. Vui lòng chạy train_surrogate_model trước.")
-        
-        # Lấy mô hình thay thế và danh sách feature đã dùng khi huấn luyện
+
         rf_model = self.surrogate_models[k]['model']
         feature_cols = self.surrogate_models[k]['feature_names']
-        X = self.df_scaled[feature_cols].values
-        
+
+        # X_scaled: dùng để tính SHAP values — phải khớp với data RF đã train
+        X_scaled = self.df_scaled[feature_cols].values
+
+        # X_display: dùng để hiển thị trong plot — giá trị gốc có đơn vị thực tế
+        # (GBP, số lượng, số lần mua...) giúp biểu đồ SHAP đọc được ý nghĩa
+        original_cols = [col for col in self.df_original.columns if not col.startswith('Cluster_')]
+        X_display = self.df_original[original_cols].values
+
         # Tạo SHAP explainer để tính mức đóng góp của từng feature
-        # Khi dữ liệu làm nền càng lớn thì thuật toán SHAP càng chính xác
-        print(f"Tính toán SHAP values cho {len(X):,} khách hàng...")
+        print(f"Tính toán SHAP values cho {len(X_scaled):,} khách hàng...")
         explainer = shap.TreeExplainer(rf_model)
-        shap_values_raw = explainer.shap_values(X)
-        
+        shap_values_raw = explainer.shap_values(X_scaled)
+
         # Chuyển SHAP values sang dạng list cho bài toán nhiều cluster
         # Shape: (n_samples, n_features, n_classes) -> list (n_samples, n_features)
-        if isinstance(shap_values_raw, np.ndarray) and len(shap_values_raw.shape) == 3:
-            # Trường hợp nhiều lớp: tách SHAP values theo từng cluster
+        if isinstance(shap_values_raw, np.ndarray) and shap_values_raw.ndim == 3:
             shap_values = [shap_values_raw[:, :, i] for i in range(shap_values_raw.shape[2])]
         else:
-            # Trường hợp nhị phân hoặc SHAP đã trả về đúng định dạng
             shap_values = shap_values_raw
-        
-        # Lưu model, metric và thông tin feature để dùng ở bước SHAP
+
         self.shap_results[k] = {
             'explainer': explainer,
             'shap_values': shap_values,
             'feature_names': feature_cols,
-            'X': X
+            'X': X_scaled,           # giữ key cũ để không break code khác
+            'X_scaled': X_scaled,    # tường minh: dùng để tính toán
+            'X_display': X_display,  # tường minh: dùng để hiển thị plot
         }
-        
+
         print(f"Hoàn thành! SHAP values: {len(shap_values)} clusters, mỗi cluster shape: {shap_values[0].shape}")
         return self.shap_results[k]
     
@@ -1218,19 +1259,262 @@ class ClusterAnalyzer:
         """
         if k not in self.shap_results:
             raise ValueError(f"Giá trị SHAP cho k={k} không tìm thấy. Vui lòng chạy calculate_shap_values trước.")
-        
-        shap_values = self.shap_results[k]['shap_values']
-        X = self.shap_results[k]['X']
+
+        shap_values   = self.shap_results[k]['shap_values']
+        X_display     = self.shap_results[k]['X_display']  # giá trị gốc: GBP, số lượng...
         feature_names = self.shap_results[k]['feature_names']
-    
-        for i in range(k):
+
+        cluster_ids = [cluster_id] if cluster_id is not None else list(range(k))
+
+        for i in cluster_ids:
+            print(f"\n── Cluster {i} ──")
             shap.summary_plot(
                 shap_values[i],
-                X,
+                X_display,       # trục x hiển thị đơn vị thực, dễ đọc hơn giá trị scaled
                 feature_names=feature_names,
-                max_display=3,
-                show=True
+                max_display=16,  # hiện đủ cả 16 features
+                show=False,
             )
+            plt.title(
+                f"SHAP Feature Importance — Cluster {i} (k={k})",
+                fontsize=13, pad=12
+            )
+            plt.tight_layout()
+            plt.show()
+
+    def apply_gmm(self, k_values=[3, 4], covariance_type="full",
+                  init_params="random_from_data", n_init=10):
+        """
+        Huấn luyện Gaussian Mixture Model với một hoặc nhiều giá trị k.
+
+        GMM khác K-Means ở chỗ cho phép các cụm có hình dạng ellipse và kích
+        thước khác nhau, phù hợp hơn khi các nhóm khách hàng không cân bằng.
+
+        Args:
+        k_values (list): Danh sách số cụm muốn thử, ví dụ [3, 4].
+        covariance_type (str): Loại ma trận covariance — "full", "tied", "diag".
+        init_params (str): Cách khởi tạo — "random_from_data" để tránh hội tụ
+            về cùng kết quả với K-Means.
+        n_init (int): Số lần khởi tạo ngẫu nhiên để chọn kết quả tốt nhất.
+
+        Returns:
+        dict: Nhãn cụm và metrics cho từng k.
+
+        """
+        from sklearn.metrics import silhouette_score
+
+        pca_data = self._get_pca_feature_matrix()
+        gmm_results = {}
+        for k in k_values:
+            gmm = GaussianMixture(
+                n_components=k,
+                covariance_type=covariance_type,
+                init_params=init_params,
+                random_state=42,
+                n_init=n_init,
+            )
+            labels = gmm.fit_predict(pca_data)
+
+            cluster_col = f"GMM_Cluster_{k}"
+            self.df_original[cluster_col] = labels
+            self.df_pca[cluster_col] = labels
+
+            feature_cols = [
+                col for col in self.df_original.columns
+                if not col.startswith("Cluster_") and not col.startswith("GMM_Cluster_")
+            ]
+
+            score = silhouette_score(pca_data, labels)
+            sizes = pd.Series(labels).value_counts().sort_index()
+
+            gmm_results[k] = {
+                "labels": labels,
+                "sizes": sizes,
+                "means": self.df_original[feature_cols].groupby(labels).mean(),
+                "silhouette": score,
+                "covariance_type": covariance_type,
+            }
+
+            print(f"GMM k={k} ({covariance_type}): Silhouette = {score:.3f}")
+            print(f"  Kích thước clusters: {sizes.to_dict()}")
+
+        return gmm_results
+
+    def plot_dbscan_tuning(self, min_samples=5):
+        """
+        Vẽ k-distance graph để hỗ trợ chọn tham số eps cho DBSCAN.
+
+        Cách đọc: tìm điểm mà đường cong bắt đầu gãy mạnh (knee point) —
+        đó là giá trị eps phù hợp. Eps quá nhỏ → nhiều noise; quá lớn →
+        tất cả gộp thành 1 cụm.
+
+        Args:
+        min_samples (int): Số điểm tối thiểu để tạo thành một cụm (mặc định 5).
+
+        """
+        pca_data = self._get_pca_feature_matrix()
+        nbrs = NearestNeighbors(n_neighbors=min_samples).fit(pca_data)
+        distances, _ = nbrs.kneighbors(pca_data)
+        distances = np.sort(distances[:, -1])
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(distances, linewidth=1.5, color="#2E86AB")
+        ax.set_xlabel("Điểm dữ liệu (sắp xếp theo khoảng cách tăng dần)")
+        ax.set_ylabel(f"Khoảng cách đến neighbor thứ {min_samples}")
+        ax.set_title(
+            f"K-Distance Graph (min_samples={min_samples})\n"
+            f"→ Chọn eps tại điểm đường cong gãy mạnh nhất"
+        )
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.show()
+
+    def apply_dbscan(self, eps=0.5, min_samples=5):
+        """
+        Chạy DBSCAN trên df_pca và lưu kết quả vào cluster_results.
+
+        DBSCAN tự động tìm số cụm dựa trên mật độ, không cần chỉ định k.
+        Điểm nằm vùng thưa được gán nhãn -1 (noise).
+
+        Args:
+        eps (float): Bán kính lân cận tối đa để gộp hai điểm vào cùng cụm.
+        min_samples (int): Số điểm tối thiểu trong bán kính eps để tạo cụm.
+
+        Returns:
+        np.ndarray: Mảng nhãn cụm (−1 là noise).
+
+        """
+        from sklearn.metrics import (
+            silhouette_score, davies_bouldin_score, calinski_harabasz_score
+        )
+
+        pca_data = self._get_pca_feature_matrix()
+        db = DBSCAN(eps=eps, min_samples=min_samples)
+        labels = db.fit_predict(pca_data)
+
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = int((labels == -1).sum())
+        noise_pct = n_noise / len(labels) * 100
+
+        print(f"DBSCAN (eps={eps}, min_samples={min_samples})")
+        print(f"  Số cluster tìm được : {n_clusters}")
+        print(f"  Noise points        : {n_noise} ({noise_pct:.1f}%)")
+
+        # Chỉ tính metrics trên các điểm không phải noise
+        mask = labels != -1
+        if mask.sum() > 0 and n_clusters > 1:
+            sil = silhouette_score(pca_data[mask], labels[mask])
+            db_score = davies_bouldin_score(pca_data[mask], labels[mask])
+            ch = calinski_harabasz_score(pca_data[mask], labels[mask])
+            print(f"  Silhouette↑        : {sil:.3f}")
+            print(f"  Davies-Bouldin↓    : {db_score:.3f}")
+            print(f"  Calinski-Harabasz↑ : {ch:.1f}")
+        else:
+            sil = db_score = ch = None
+            print("  ⚠ Không đủ cluster để tính metrics — thử điều chỉnh eps")
+
+        self.cluster_results["dbscan"] = {
+            "labels": labels,
+            "n_clusters": n_clusters,
+            "n_noise": n_noise,
+            "eps": eps,
+            "min_samples": min_samples,
+            "metrics": {
+                "silhouette": sil,
+                "davies_bouldin": db_score,
+                "calinski_harabasz": ch,
+            },
+        }
+        return labels
+
+    def compare_clustering(self, k_values=[3, 4],
+                           cov_types=["full", "tied", "diag"],
+                           include_dbscan=True):
+        """
+        So sánh hiệu suất K-Means, GMM và DBSCAN trên 3 metrics.
+
+        Bảng kết quả giúp chọn thuật toán và tham số tốt nhất trước khi
+        tiến hành phân tích sâu (Radar Chart, SHAP).
+
+        Cách đọc:
+        - Silhouette↑   : càng cao càng tốt (cụm tách biệt)
+        - Davies-Bouldin↓: càng thấp càng tốt (cụm gọn, xa nhau)
+        - Calinski-Harabasz↑: càng cao càng tốt (cụm dày đặc, tách biệt)
+
+        Args:
+        k_values (list): Các giá trị k đã dùng cho K-Means.
+        cov_types (list): Các loại covariance của GMM cần so sánh.
+        include_dbscan (bool): Có đưa DBSCAN vào bảng so sánh không.
+
+        Returns:
+        pd.DataFrame: Bảng so sánh metrics của các thuật toán.
+
+        """
+        from sklearn.metrics import (
+            silhouette_score, davies_bouldin_score, calinski_harabasz_score
+        )
+
+        pca_data = self._get_pca_feature_matrix()
+        results = []
+
+        # ── K-Means ──────────────────────────────────────────────────────────
+        for k in k_values:
+            if k not in self.cluster_results:
+                print(f"⚠ K-Means k={k} chưa chạy — bỏ qua")
+                continue
+            labels = self.cluster_results[k]["labels"]
+            results.append({
+                "Thuật toán": f"K-Means",
+                "Tham số": f"k={k}",
+                "Silhouette↑": silhouette_score(pca_data, labels),
+                "Davies-Bouldin↓": davies_bouldin_score(pca_data, labels),
+                "Calinski-Harabasz↑": calinski_harabasz_score(pca_data, labels),
+            })
+
+        # ── GMM ──────────────────────────────────────────────────────────────
+        for k in k_values:
+            for cov in cov_types:
+                gmm = GaussianMixture(
+                    n_components=k,
+                    covariance_type=cov,
+                    init_params="random_from_data",
+                    random_state=42,
+                    n_init=10,
+                )
+                labels = gmm.fit_predict(pca_data)
+                results.append({
+                    "Thuật toán": "GMM",
+                    "Tham số": f"k={k}, cov={cov}",
+                    "Silhouette↑": silhouette_score(pca_data, labels),
+                    "Davies-Bouldin↓": davies_bouldin_score(pca_data, labels),
+                    "Calinski-Harabasz↑": calinski_harabasz_score(pca_data, labels),
+                })
+
+        # ── DBSCAN ───────────────────────────────────────────────────────────
+        if include_dbscan:
+            if "dbscan" not in self.cluster_results:
+                print("⚠ DBSCAN chưa chạy — hãy gọi apply_dbscan() trước")
+            else:
+                m = self.cluster_results["dbscan"]["metrics"]
+                eps = self.cluster_results["dbscan"]["eps"]
+                ms = self.cluster_results["dbscan"]["min_samples"]
+                n_noise = self.cluster_results["dbscan"]["n_noise"]
+                n_clusters = self.cluster_results["dbscan"]["n_clusters"]
+                results.append({
+                    "Thuật toán": "DBSCAN",
+                    "Tham số": f"eps={eps}, ms={ms}, k={n_clusters}, noise={n_noise}",
+                    "Silhouette↑": m["silhouette"],
+                    "Davies-Bouldin↓": m["davies_bouldin"],
+                    "Calinski-Harabasz↑": m["calinski_harabasz"],
+                })
+
+        df_result = (
+            pd.DataFrame(results)
+            .set_index(["Thuật toán", "Tham số"])
+            .round(3)
+        )
+        display(df_result)
+        return df_result
 
     def save_clusters(self, output_dir="../data/processed"):
         """
@@ -1243,7 +1527,15 @@ class ClusterAnalyzer:
         os.makedirs(output_dir, exist_ok=True)
 
         for k in self.cluster_results.keys():
+            # Chỉ lưu K-Means/GMM (key là số nguyên) — bỏ qua "dbscan" và các key khác
+            if not isinstance(k, int):
+                continue
+
             cluster_col = f"Cluster_{k}"
+            if cluster_col not in self.df_original.columns:
+                print(f"⚠ Bỏ qua k={k}: cột '{cluster_col}' không có trong df_original")
+                continue
+
             cluster_output = self.df_original[[cluster_col]].copy()
             cluster_output.columns = ["Cluster"]
             cluster_output = cluster_output.reset_index()
@@ -1252,9 +1544,23 @@ class ClusterAnalyzer:
             cluster_output.to_csv(
                 f"{output_dir}/customer_clusters_k{k}.csv", index=False
             )
-            print(
-                f"Đã lưu kết quả phân cụm k={k}: {output_dir}/customer_clusters_k{k}.csv"
-            )
+            print(f"Đã lưu kết quả phân cụm k={k}: {output_dir}/customer_clusters_k{k}.csv")
+
+        # Lưu DBSCAN riêng nếu đã chạy
+        if "dbscan" in self.cluster_results:
+            dbscan_info = self.cluster_results["dbscan"]
+            labels = dbscan_info["labels"]
+            eps    = dbscan_info["eps"]
+            ms     = dbscan_info["min_samples"]
+
+            dbscan_output = self.df_original[[]].copy().reset_index()
+            dbscan_output["Cluster"]  = labels
+            dbscan_output["is_noise"] = (labels == -1)
+            dbscan_output = dbscan_output.sort_values(["Cluster", "CustomerID"])
+
+            filename = f"{output_dir}/customer_clusters_dbscan_eps{eps}_ms{ms}.csv"
+            dbscan_output.to_csv(filename, index=False)
+            print(f"Đã lưu kết quả DBSCAN: {filename}")
 
 
 class DataVisualizer:
