@@ -13,8 +13,6 @@ Expected files in data/processed/:
 import os
 import warnings
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -23,7 +21,6 @@ import streamlit as st
 from plotly.subplots import make_subplots
 from sklearn.decomposition import PCA
 
-matplotlib.use("Agg")
 warnings.filterwarnings("ignore")
 
 # ─────────────────────────────────────────────
@@ -58,10 +55,24 @@ st.markdown(
   }
 
   html, body, [data-testid="stAppViewContainer"] {
-    background-color: var(--bg) !important;
+        background:
+            radial-gradient(circle at top left, rgba(108, 99, 255, 0.18), transparent 28%),
+            radial-gradient(circle at top right, rgba(247, 151, 30, 0.12), transparent 24%),
+            linear-gradient(180deg, #0d0f1a 0%, #0b1020 100%) !important;
     color: var(--text) !important;
     font-family: 'DM Sans', sans-serif;
   }
+
+    [data-testid="stAppViewContainer"]::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background-image: linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+        background-size: 28px 28px;
+        mask-image: linear-gradient(180deg, rgba(0,0,0,0.45), transparent 85%);
+        opacity: 0.35;
+    }
 
   [data-testid="stSidebar"] {
     background-color: var(--surface) !important;
@@ -77,8 +88,57 @@ st.markdown(
     padding: 18px 22px;
     margin-bottom: 12px;
     transition: border-color 0.2s;
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
   }
   .metric-card:hover { border-color: var(--accent1); }
+
+    .hero-banner {
+        background: linear-gradient(135deg, rgba(108, 99, 255, 0.18), rgba(255, 101, 132, 0.10));
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 22px 24px;
+        margin: 4px 0 18px 0;
+        box-shadow: 0 22px 46px rgba(0, 0, 0, 0.18);
+    }
+    .hero-kicker {
+        display: inline-block;
+        font-family: 'Space Mono', monospace;
+        font-size: 0.72rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--accent3);
+        margin-bottom: 8px;
+    }
+    .hero-title {
+        font-family: 'Space Mono', monospace;
+        font-size: 2rem;
+        font-weight: 700;
+        line-height: 1.2;
+        margin-bottom: 8px;
+    }
+    .hero-subtitle {
+        color: var(--muted);
+        font-size: 0.98rem;
+        line-height: 1.6;
+        max-width: 860px;
+    }
+    .hero-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+    }
+    .hero-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 6px 12px;
+        font-size: 0.82rem;
+        color: var(--text);
+    }
 
   .metric-value {
     font-family: 'Space Mono', monospace;
@@ -185,16 +245,16 @@ RADAR_FEATURES = {
 }
 
 SEGMENT_PERSONAS_K4 = {
-    0: {"name": "💎 Khách VIP", "color": "#6c63ff", "desc": "Chi tiêu cao, mua thường xuyên, đa dạng sản phẩm"},
-    1: {"name": "🔥 Khách Tiềm Năng", "color": "#ff6584", "desc": "Tần suất trung bình, giá trị đơn hàng cao"},
-    2: {"name": "🌱 Khách Mới", "color": "#43e97b", "desc": "Ít giao dịch, chi tiêu thấp, đang khám phá"},
-    3: {"name": "😴 Khách Không Hoạt Động", "color": "#f7971e", "desc": "Lịch sử mua ít, cần tái kích hoạt"},
+    0: {"name": "Nhóm quy mô trung bình", "color": "#6c63ff", "desc": "Chi tiêu và khối lượng mua ở mức vừa phải"},
+    1: {"name": "Nhóm giá trung bình cao", "color": "#ff6584", "desc": "Mức giá trung bình cao hơn mặt bằng chung"},
+    2: {"name": "Nhóm mua nhiều thường xuyên", "color": "#43e97b", "desc": "Tổng chi tiêu và số lượng mua nổi bật"},
+    3: {"name": "Nhóm đa dạng sản phẩm", "color": "#f7971e", "desc": "Danh mục mua sắm rộng và phân tán hơn"},
 }
 
 SEGMENT_PERSONAS_K3 = {
-    0: {"name": "💎 Khách VIP", "color": "#6c63ff", "desc": "Chi tiêu cao, mua thường xuyên"},
-    1: {"name": "🔥 Khách Trung Bình", "color": "#ff6584", "desc": "Hành vi mua trung bình"},
-    2: {"name": "🌱 Khách Ít Hoạt Động", "color": "#43e97b", "desc": "Chi tiêu thấp, ít giao dịch"},
+    0: {"name": "Nhóm giá trị cao", "color": "#6c63ff", "desc": "Chi tiêu và mức giá mua cao"},
+    1: {"name": "Nhóm mua nhiều", "color": "#ff6584", "desc": "Tổng chi tiêu và khối lượng mua lớn"},
+    2: {"name": "Nhóm đa dạng", "color": "#43e97b", "desc": "Khách hàng có danh mục mua sắm đa dạng"},
 }
 
 DATA_DIR = "data/processed"
@@ -255,6 +315,21 @@ PLOTLY_LAYOUT = dict(
 )
 
 
+def render_page_hero(kicker, title, subtitle, chips):
+        chip_html = "".join(f"<span class='hero-chip'>{chip}</span>" for chip in chips)
+        st.markdown(
+                f"""
+<div class='hero-banner'>
+    <div class='hero-kicker'>{kicker}</div>
+    <div class='hero-title'>{title}</div>
+    <div class='hero-subtitle'>{subtitle}</div>
+    <div class='hero-chips'>{chip_html}</div>
+</div>
+""",
+                unsafe_allow_html=True,
+        )
+
+
 # ─────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────
@@ -308,6 +383,12 @@ if features_df is None or clusters_k is None:
 # ─────────────────────────────────────────────
 if page == "📊 Tổng Quan":
     st.markdown("# 📊 Tổng Quan")
+    render_page_hero(
+        "Customer Segmentation Dashboard",
+        "Phân tích hành vi khách hàng bằng K-Means, PCA và SHAP",
+        "Giao diện tập trung vào 16 features cấp khách hàng, giúp xem nhanh quy mô từng nhóm, so sánh radar chart và truy vết nguyên nhân bằng SHAP.",
+        ["K-Means clustering", "PCA visualization", "16 SHAP features", "Business personas"],
+    )
     st.markdown(f"<div class='section-header'>Phân tích K = {k_choice} phân khúc khách hàng</div>", unsafe_allow_html=True)
 
     # ── Top KPI row
@@ -400,6 +481,12 @@ if page == "📊 Tổng Quan":
 # ─────────────────────────────────────────────
 elif page == "🔍 Khám Phá Phân Khúc":
     st.markdown("# 🔍 Khám Phá Phân Khúc")
+    render_page_hero(
+        "Segmentation Explorer",
+        "So sánh radar chart, feature distribution và bảng thống kê",
+        "Mục này được thiết kế như một bảng điều khiển khám phá: xem nhanh profile từng cluster rồi drill-down theo feature cụ thể.",
+        ["Radar chart", "Box / violin plots", "Cluster statistics"],
+    )
 
     if merged_df is None or cluster_col not in merged_df.columns:
         st.warning("Không có dữ liệu cluster.")
@@ -523,6 +610,12 @@ elif page == "🔍 Khám Phá Phân Khúc":
 # ─────────────────────────────────────────────
 elif page == "📈 Phân Tích RFM":
     st.markdown("# 📈 Phân Tích RFM")
+    render_page_hero(
+        "Retail Activity",
+        "Quan sát doanh thu, sản phẩm và hành vi mua theo thời gian",
+        "Trang này giúp nhìn dữ liệu gốc theo góc vận hành: thời gian, sản phẩm bán chạy và phân phối giao dịch của khách hàng.",
+        ["Revenue trend", "Top products", "Customer distribution"],
+    )
 
     if cleaned_df is None:
         st.warning("Không tìm thấy `cleaned_uk_data.csv`. Trang này cần dữ liệu giao dịch thô.")
@@ -618,6 +711,12 @@ elif page == "📈 Phân Tích RFM":
 # ─────────────────────────────────────────────
 elif page == "🧭 Không Gian PCA":
     st.markdown("# 🧭 Không Gian PCA")
+    render_page_hero(
+        "Dimensional View",
+        "Khám phá cấu trúc cụm trong không gian PCA",
+        "PCA giúp nhìn rõ độ tách cụm trong 2D/3D và cho biết bao nhiêu phương sai được giữ lại khi giảm chiều.",
+        ["2D scatter", "3D scatter", "Explained variance"],
+    )
 
     if scaled_df is None or merged_df is None:
         st.warning("Không có dữ liệu scaled features.")
@@ -717,6 +816,12 @@ elif page == "🧭 Không Gian PCA":
 elif page == "🏆 Xếp Hạng Khách Hàng":
     st.markdown("# 🏆 Xếp Hạng Khách Hàng")
     st.markdown("<div class='section-header'>Danh sách chi tiết khách hàng theo từng phân khúc</div>", unsafe_allow_html=True)
+    render_page_hero(
+        "Customer Ranking",
+        "Xếp hạng theo hành vi mua và drill-down từng phân khúc",
+        "Trang này phù hợp khi cần lọc, so sánh và xuất danh sách khách hàng theo các KPI kinh doanh.",
+        ["Top customers", "Segment drill-down", "CSV export"],
+    )
 
     if merged_df is None or cluster_col not in merged_df.columns:
         st.warning("Không có dữ liệu cluster.")
@@ -929,6 +1034,12 @@ elif page == "🏆 Xếp Hạng Khách Hàng":
 # ─────────────────────────────────────────────
 elif page == "👤 Tra Cứu Khách Hàng":
     st.markdown("# 👤 Tra Cứu Khách Hàng")
+    render_page_hero(
+        "Customer Lookup",
+        "Xem hồ sơ một khách hàng cụ thể trong ngữ cảnh cluster",
+        "Trang tra cứu kết hợp metric cá nhân, radar so sánh và lịch sử giao dịch để đọc nhanh hành vi của một khách hàng.",
+        ["Customer profile", "Segment comparison", "Transaction history"],
+    )
 
     if merged_df is None or cluster_col not in merged_df.columns:
         st.warning("Không có dữ liệu cluster.")
