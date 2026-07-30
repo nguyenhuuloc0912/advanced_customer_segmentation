@@ -19,7 +19,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
+from scipy import stats as scipy_stats
+from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings("ignore")
 
@@ -260,6 +263,62 @@ SEGMENT_PERSONAS_K3 = {
 }
 
 DATA_DIR = "data/processed"
+MERGED_FILES = {
+    "cleaned": f"{DATA_DIR}/cleaned_uk_data_merged.csv",
+    "features": f"{DATA_DIR}/customer_features_merged.csv",
+    "scaled": f"{DATA_DIR}/customer_features_scaled_merged.csv",
+    "clusters_k3": f"{DATA_DIR}/customer_clusters_k3_merged.csv",
+    "clusters_k4": f"{DATA_DIR}/customer_clusters_k4_merged.csv",
+}
+
+
+def save_merged_to_disk(rec):
+    """Ghi dữ liệu đã gộp/tính lại ra các file *_merged.csv riêng biệt trong data/processed/,
+    KHÔNG đè lên các file gốc (cleaned_uk_data.csv, customer_features.csv...).
+    Nhờ đó dữ liệu vẫn còn sau khi tải lại trang (F5) hoặc khởi động lại app,
+    trong khi vẫn giữ nguyên baseline gốc để có thể "Khôi phục dữ liệu gốc" bất kỳ lúc nào."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        rec["cleaned"].to_csv(MERGED_FILES["cleaned"], index=False)
+        rec["features"].to_csv(MERGED_FILES["features"], index=True)
+        rec["scaled"].to_csv(MERGED_FILES["scaled"], index=True)
+        rec["clusters_k3"].to_csv(MERGED_FILES["clusters_k3"], index=False)
+        rec["clusters_k4"].to_csv(MERGED_FILES["clusters_k4"], index=False)
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+def load_merged_from_disk():
+    """Đọc lại dữ liệu đã gộp từ các file *_merged.csv nếu tồn tại. Trả về None nếu chưa từng lưu."""
+    if not all(os.path.exists(p) for p in MERGED_FILES.values()):
+        return None
+    try:
+        cleaned = pd.read_csv(MERGED_FILES["cleaned"])
+        features = pd.read_csv(MERGED_FILES["features"], index_col=0)
+        scaled = pd.read_csv(MERGED_FILES["scaled"], index_col=0)
+        clusters_k3 = pd.read_csv(MERGED_FILES["clusters_k3"])
+        clusters_k4 = pd.read_csv(MERGED_FILES["clusters_k4"])
+        features.index = features.index.astype(str)
+        scaled.index = scaled.index.astype(str)
+        n_total = len(features)
+        return {
+            "cleaned": cleaned, "features": features, "scaled": scaled,
+            "clusters_k3": clusters_k3, "clusters_k4": clusters_k4,
+            "n_new_customers": None,  # không rõ số khách mới sau khi đọc lại từ đĩa
+            "n_total_customers": n_total,
+        }
+    except Exception:
+        return None
+
+
+def delete_merged_from_disk():
+    for p in MERGED_FILES.values():
+        if os.path.exists(p):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
 
 
 # ─────────────────────────────────────────────
@@ -305,6 +364,144 @@ def merge_clusters(features_df, clusters_df, k):
 
 
 # ─────────────────────────────────────────────
+# UPLOAD & RECOMPUTE PIPELINE
+# ─────────────────────────────────────────────
+REQUIRED_RAW_COLUMNS = [
+    "InvoiceNo", "StockCode", "Description", "Quantity",
+    "InvoiceDate", "UnitPrice", "CustomerID", "Country",
+]
+
+
+def normalize_customer_id(series):
+    """Chuẩn hóa CustomerID về CHUỖI SỐ NGUYÊN nhất quán, bất kể dữ liệu gốc
+    lưu dưới dạng float (17850.0), int (17850), hay string ("17850", "17850.0").
+    Bắt buộc phải gọi hàm này ở MỌI nơi dữ liệu cũ và dữ liệu mới giao nhau,
+    nếu không groupby/merge theo CustomerID sẽ đếm trùng khách hàng do lệch kiểu dữ liệu
+    (vd: 17850.0 và "17850" bị coi là hai khách hàng khác nhau)."""
+    numeric = pd.to_numeric(series, errors="coerce")
+    return numeric.round().astype("Int64").astype(str)
+
+
+def clean_new_upload(df_raw):
+    """Áp dụng đúng các bước làm sạch đã dùng trong notebook 01_cleaning_and_eda
+    lên dữ liệu giao dịch mới do doanh nghiệp tải lên."""
+    df = df_raw.copy()
+    missing = [c for c in REQUIRED_RAW_COLUMNS if c not in df.columns]
+    if missing:
+        raise ValueError(
+            "File thiếu các cột bắt buộc: " + ", ".join(missing) +
+            ". Cần đúng cấu trúc: " + ", ".join(REQUIRED_RAW_COLUMNS)
+        )
+
+    df = df.dropna(subset=["CustomerID"])
+    df["InvoiceNo"] = df["InvoiceNo"].astype(str)
+    df = df[~df["InvoiceNo"].str.startswith("C")]  # loại hóa đơn hủy
+    df = df[df["Country"].astype(str).str.strip() == "United Kingdom"]  # chỉ thị trường UK
+    df = df[(df["Quantity"] > 0) & (df["UnitPrice"] > 0)]  # loại số lượng/giá không hợp lệ
+
+    df["CustomerID"] = normalize_customer_id(df["CustomerID"])
+    df["InvoiceDate"] = pd.to_datetime(df["InvoiceDate"], errors="coerce")
+    return df.reset_index(drop=True)
+
+
+def build_customer_features(df_clean):
+    """Xây dựng lại đúng 16 đặc trưng khách hàng (4 nhóm) từ dữ liệu giao dịch đã làm sạch,
+    theo cùng định nghĩa đã dùng trong notebook 02_feature_engineering."""
+    df = df_clean.copy()
+    df["TotalPrice"] = df["Quantity"] * df["UnitPrice"]
+
+    # Nhóm cơ bản (6)
+    basic = df.groupby("CustomerID").agg(
+        Sum_Quantity=("Quantity", "sum"),
+        Mean_UnitPrice=("UnitPrice", "mean"),
+        Mean_TotalPrice=("TotalPrice", "mean"),
+        Sum_TotalPrice=("TotalPrice", "sum"),
+        Count_Invoice=("InvoiceNo", "nunique"),
+        Count_Stock=("StockCode", "nunique"),
+    )
+
+    # Nhóm theo sản phẩm (2)
+    stock_invoice = df.groupby(["CustomerID", "StockCode"])["InvoiceNo"].nunique()
+    mean_invoice_count_per_stock = stock_invoice.groupby("CustomerID").mean()
+
+    invoice_stock = df.groupby(["CustomerID", "InvoiceNo"])["StockCode"].nunique()
+    mean_stock_count_per_invoice = invoice_stock.groupby("CustomerID").mean()
+
+    # Nhóm theo hóa đơn (4)
+    per_invoice = df.groupby(["CustomerID", "InvoiceNo"]).agg(
+        UnitPriceMean=("UnitPrice", "mean"),
+        QuantitySum=("Quantity", "sum"),
+        TotalPriceMean=("TotalPrice", "mean"),
+        TotalPriceSum=("TotalPrice", "sum"),
+    )
+    invoice_based = per_invoice.groupby("CustomerID").agg(
+        Mean_UnitPriceMeanPerInvoice=("UnitPriceMean", "mean"),
+        Mean_QuantitySumPerInvoice=("QuantitySum", "mean"),
+        Mean_TotalPriceMeanPerInvoice=("TotalPriceMean", "mean"),
+        Mean_TotalPriceSumPerInvoice=("TotalPriceSum", "mean"),
+    )
+
+    # Nhóm theo loại sản phẩm (4)
+    per_stock = df.groupby(["CustomerID", "StockCode"]).agg(
+        UnitPriceMean=("UnitPrice", "mean"),
+        QuantitySum=("Quantity", "sum"),
+        TotalPriceMean=("TotalPrice", "mean"),
+        TotalPriceSum=("TotalPrice", "sum"),
+    )
+    stock_based = per_stock.groupby("CustomerID").agg(
+        Mean_UnitPriceMeanPerStock=("UnitPriceMean", "mean"),
+        Mean_QuantitySumPerStock=("QuantitySum", "mean"),
+        Mean_TotalPriceMeanPerStock=("TotalPriceMean", "mean"),
+        Mean_TotalPriceSumPerStock=("TotalPriceSum", "mean"),
+    )
+
+    features = basic.copy()
+    features["Mean_InvoiceCountPerStock"] = mean_invoice_count_per_stock
+    features["Mean_StockCountPerInvoice"] = mean_stock_count_per_invoice
+    features = features.join(invoice_based).join(stock_based)
+    features.index = features.index.astype(str)
+    features.index.name = "CustomerID"
+    return features[[
+        "Sum_Quantity", "Mean_UnitPrice", "Mean_TotalPrice", "Sum_TotalPrice", "Count_Invoice", "Count_Stock",
+        "Mean_InvoiceCountPerStock", "Mean_StockCountPerInvoice",
+        "Mean_UnitPriceMeanPerInvoice", "Mean_QuantitySumPerInvoice",
+        "Mean_TotalPriceMeanPerInvoice", "Mean_TotalPriceSumPerInvoice",
+        "Mean_UnitPriceMeanPerStock", "Mean_QuantitySumPerStock",
+        "Mean_TotalPriceMeanPerStock", "Mean_TotalPriceSumPerStock",
+    ]]
+
+
+def transform_and_cluster(features_df, k_list=(3, 4), random_state=42):
+    """Box-Cox -> StandardScaler -> PCA (>=85% phương sai) -> KMeans(k) cho từng k trong k_list."""
+    X = features_df.copy()
+
+    boxcox_df = pd.DataFrame(index=X.index)
+    for col in X.columns:
+        vals = X[col].values.astype(float)
+        shift = abs(vals.min()) + 1.0 if vals.min() <= 0 else 0.0
+        try:
+            transformed, _ = scipy_stats.boxcox(vals + shift)
+        except Exception:
+            transformed = np.log1p(vals + shift)  # fallback nếu Box-Cox không hội tụ
+        boxcox_df[col] = transformed
+
+    scaler = StandardScaler()
+    scaled_vals = scaler.fit_transform(boxcox_df.values)
+    scaled_df = pd.DataFrame(scaled_vals, index=X.index, columns=X.columns)
+
+    pca = PCA(n_components=0.85, svd_solver="full", random_state=random_state)
+    pca_coords = pca.fit_transform(scaled_vals)
+
+    cluster_results = {}
+    for k in k_list:
+        km = KMeans(n_clusters=k, random_state=random_state, n_init=10)
+        labels = km.fit_predict(pca_coords)
+        cluster_results[k] = pd.DataFrame({"CustomerID": X.index, "Cluster": labels})
+
+    return scaled_df, pca_coords, pca.explained_variance_ratio_, cluster_results
+
+
+# ─────────────────────────────────────────────
 # PLOTLY THEME
 # ─────────────────────────────────────────────
 PLOTLY_LAYOUT = dict(
@@ -345,19 +542,49 @@ with st.sidebar:
     st.markdown("<div class='section-header'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "Chọn trang",
-        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "⚖️ So Sánh K=3 vs K=4", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng", "🧪 Mô Phỏng Khách Hàng"],
+        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "⚖️ So Sánh K=3 vs K=4", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng", "🧪 Mô Phỏng Khách Hàng", "📤 Cập Nhật Dữ Liệu Mới"],
         label_visibility="collapsed",
     )
     st.markdown("---")
+
+    if st.session_state.get("recomputed"):
+        rec = st.session_state["recomputed"]
+        new_label = f"+{rec['n_new_customers']} khách hàng mới · " if rec.get("n_new_customers") is not None else ""
+        st.markdown(
+            f"<div style='color:#2dd4a7;font-size:0.75rem;'>🟢 Đang dùng dữ liệu đã gộp<br>"
+            f"{new_label}{rec['n_total_customers']} tổng cộng</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<div style='color:#8894a8;font-size:0.72rem;'>⚪ Đang dùng dữ liệu gốc</div>",
+            unsafe_allow_html=True,
+        )
     st.markdown(
-        "<div style='color:#8894a8;font-size:0.72rem;'>Online Retail Dataset · UK Customers<br>KMeans + PCA + Feature Engineering</div>",
+        "<div style='color:#8894a8;font-size:0.72rem;margin-top:8px;'>Online Retail Dataset · UK Customers<br>KMeans + PCA + Feature Engineering</div>",
         unsafe_allow_html=True,
     )
 
 # ─────────────────────────────────────────────
-# LOAD DATA
+# LOAD DATA  (dùng dữ liệu đã gộp/tính lại nếu có)
 # ─────────────────────────────────────────────
 data = load_all_data()
+
+# Nếu trang vừa được tải lại (F5) và session_state trống, tự động khôi phục
+# dữ liệu đã gộp lần gần nhất từ file *_merged.csv trên đĩa (nếu có).
+if "recomputed" not in st.session_state:
+    restored = load_merged_from_disk()
+    st.session_state["recomputed"] = restored
+    st.session_state["just_restored"] = restored is not None
+
+if st.session_state.get("recomputed"):
+    rec = st.session_state["recomputed"]
+    data["cleaned"] = rec["cleaned"]
+    data["features"] = rec["features"]
+    data["scaled"] = rec["scaled"]
+    data["clusters_k3"] = rec["clusters_k3"]
+    data["clusters_k4"] = rec["clusters_k4"]
+
 features_df = data["features"]
 scaled_df = data["scaled"]
 clusters_k = data[f"clusters_k{k_choice}"]
@@ -1401,3 +1628,160 @@ elif page == "🧪 Mô Phỏng Khách Hàng":
         "Kết quả có thể lệch nhẹ so với mô hình K-Means chính thức — phù hợp để minh họa trực quan, "
         "không dùng làm căn cứ quyết định kinh doanh chính thức."
     )
+
+
+# ─────────────────────────────────────────────
+# ══ PAGE: CẬP NHẬT DỮ LIỆU MỚI ══
+# ─────────────────────────────────────────────
+elif page == "📤 Cập Nhật Dữ Liệu Mới":
+    st.markdown("# 📤 Cập Nhật Dữ Liệu Mới")
+    render_page_hero(
+        "Data Refresh",
+        "Gộp dữ liệu giao dịch mới và tính lại toàn bộ phân khúc",
+        "Tải lên file CSV giao dịch mới theo đúng cấu trúc dữ liệu gốc. Hệ thống sẽ làm sạch, gộp với dữ liệu "
+        "hiện có, và tính lại toàn bộ pipeline — đặc trưng khách hàng, Box-Cox, PCA và phân cụm K-Means "
+        "(k=3, k=4) — ngay trên dashboard, không cần chạy lại notebook.",
+        ["Upload CSV", "Auto-merge", "Recompute pipeline"],
+    )
+
+    st.info(
+        "**File CSV cần có đúng các cột:** `InvoiceNo`, `StockCode`, `Description`, `Quantity`, "
+        "`InvoiceDate`, `UnitPrice`, `CustomerID`, `Country` — giống cấu trúc dữ liệu gốc (Online Retail Dataset). "
+        "Hệ thống sẽ tự động loại hóa đơn hủy, lọc thị trường UK, và loại bản ghi thiếu CustomerID trước khi gộp."
+    )
+
+    if st.session_state.get("recomputed"):
+        rec = st.session_state["recomputed"]
+        if st.session_state.get("just_restored"):
+            st.info("🔄 Đã tự động khôi phục dữ liệu đã gộp từ lần cập nhật gần nhất (lưu trên đĩa).")
+            st.session_state["just_restored"] = False
+
+        new_label = f"+{rec['n_new_customers']} khách hàng mới, " if rec.get("n_new_customers") is not None else ""
+        st.success(
+            f"🟢 Dashboard đang hiển thị **dữ liệu đã gộp**: {new_label}"
+            f"{rec['n_total_customers']} khách hàng tổng cộng. Tất cả các trang khác đã tự động cập nhật theo dữ liệu này. "
+            f"Dữ liệu này **đã được lưu trên đĩa** nên sẽ không mất khi bạn tải lại trang (F5)."
+        )
+        col_reset1, col_reset2 = st.columns(2)
+        with col_reset1:
+            if st.button("↩️ Khôi phục dữ liệu gốc (chỉ phiên này)"):
+                st.session_state["recomputed"] = None
+                st.rerun()
+        with col_reset2:
+            if st.button("🗑️ Xóa hẳn dữ liệu đã lưu trên đĩa"):
+                delete_merged_from_disk()
+                st.session_state["recomputed"] = None
+                st.rerun()
+        st.markdown("---")
+
+    uploaded_file = st.file_uploader("Chọn file CSV giao dịch mới", type=["csv"])
+
+    if uploaded_file is not None:
+        try:
+            new_raw = pd.read_csv(uploaded_file, encoding="latin1")
+        except Exception:
+            uploaded_file.seek(0)
+            new_raw = pd.read_csv(uploaded_file)
+
+        st.markdown("### Xem trước dữ liệu tải lên")
+        st.dataframe(new_raw.head(10), use_container_width=True)
+        st.caption(f"{len(new_raw):,} dòng giao dịch trong file tải lên.")
+
+        if st.button("🔄 Gộp & Tính Lại Toàn Bộ Phân Khúc", type="primary"):
+            with st.spinner("Đang làm sạch, gộp dữ liệu và tính lại pipeline — có thể mất vài giây..."):
+                try:
+                    new_clean = clean_new_upload(new_raw)
+                except ValueError as e:
+                    st.error(f"❌ {e}")
+                    st.stop()
+
+                if len(new_clean) == 0:
+                    st.warning(
+                        "Sau khi làm sạch, không còn dòng giao dịch hợp lệ nào. "
+                        "Kiểm tra lại cột `Country` (phải là 'United Kingdom') và `CustomerID` (không được để trống)."
+                    )
+                    st.stop()
+
+                base_clean = data["cleaned"].copy() if data["cleaned"] is not None else pd.DataFrame(columns=new_clean.columns)
+                if "CustomerID" in base_clean.columns and len(base_clean) > 0:
+                    base_clean["CustomerID"] = normalize_customer_id(base_clean["CustomerID"])
+                combined_clean = pd.concat([base_clean, new_clean], ignore_index=True).drop_duplicates()
+
+                old_customers = set(normalize_customer_id(pd.Series(features_df.index))) if features_df is not None else set()
+
+                new_features = build_customer_features(combined_clean)
+                added_customers = set(new_features.index) - old_customers
+
+                new_scaled, pca_coords, evr, cluster_results = transform_and_cluster(new_features, k_list=(3, 4))
+
+                st.session_state["recomputed"] = {
+                    "cleaned": combined_clean,
+                    "features": new_features,
+                    "scaled": new_scaled,
+                    "clusters_k3": cluster_results[3],
+                    "clusters_k4": cluster_results[4],
+                    "n_new_customers": len(added_customers),
+                    "n_total_customers": len(new_features),
+                }
+                saved_ok, save_err = save_merged_to_disk(st.session_state["recomputed"])
+
+            st.success(
+                f"✅ Đã gộp và tính lại thành công! **{len(added_customers)} khách hàng mới**, "
+                f"tổng cộng **{len(new_features)} khách hàng**. PCA giữ lại {len(evr)} thành phần chính "
+                f"({np.sum(evr):.1%} phương sai giải thích)."
+            )
+            if saved_ok:
+                st.caption("💾 Đã lưu kết quả xuống `data/processed/*_merged.csv` — sẽ không mất khi tải lại trang.")
+            else:
+                st.warning(
+                    f"⚠️ Không thể lưu xuống đĩa ({save_err}). Dữ liệu vẫn dùng được trong phiên làm việc hiện tại, "
+                    "nhưng sẽ mất nếu tải lại trang (F5). Hãy dùng nút tải CSV bên dưới để lưu thủ công."
+                )
+
+            st.markdown("### So sánh phân bố cụm trước và sau khi gộp (k=4)")
+            old_k4 = data["clusters_k4"]
+            new_k4 = cluster_results[4]
+            old_dist = (old_k4["Cluster"].value_counts(normalize=True).sort_index() * 100) if old_k4 is not None else None
+            new_dist = new_k4["Cluster"].value_counts(normalize=True).sort_index() * 100
+
+            comp_fig = go.Figure()
+            if old_dist is not None:
+                comp_fig.add_trace(go.Bar(
+                    x=[f"Cụm {i}" for i in old_dist.index], y=old_dist.values,
+                    name="Trước khi gộp", marker_color="#7b8794",
+                ))
+            comp_fig.add_trace(go.Bar(
+                x=[f"Cụm {i}" for i in new_dist.index], y=new_dist.values,
+                name="Sau khi gộp", marker_color="#7c8aff",
+            ))
+            comp_fig.update_layout(
+                **PLOTLY_LAYOUT, height=380, barmode="group",
+                yaxis_title="Tỷ lệ khách hàng (%)",
+                legend=dict(orientation="h", y=-0.15, x=0.5, xanchor="center"),
+            )
+            st.plotly_chart(comp_fig, use_container_width=True)
+
+            st.info(
+                "💡 Chuyển sang các trang khác (Tổng Quan, Khám Phá Phân Khúc, Xếp Hạng Khách Hàng...) "
+                "để xem toàn bộ dashboard đã cập nhật theo dữ liệu mới."
+            )
+
+            st.markdown("### Tải kết quả đã tính lại")
+            dl_col1, dl_col2 = st.columns(2)
+            with dl_col1:
+                st.download_button(
+                    "⬇️ Tải customer_features_updated.csv",
+                    new_features.to_csv(index=True).encode("utf-8"),
+                    file_name="customer_features_updated.csv",
+                    mime="text/csv",
+                )
+            with dl_col2:
+                st.download_button(
+                    "⬇️ Tải customer_clusters_k4_updated.csv",
+                    cluster_results[4].to_csv(index=False).encode("utf-8"),
+                    file_name="customer_clusters_k4_updated.csv",
+                    mime="text/csv",
+                )
+
+    st.markdown("---")
+    
