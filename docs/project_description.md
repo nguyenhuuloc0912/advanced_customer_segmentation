@@ -150,9 +150,9 @@ Raw Data → Data Cleaning → Feature Engineering → Transformation → Cluste
 - **Quốc gia**: 37 countries
 
 **Sau làm sạch (UK only)**:
-
-- **Giao dịch hợp lệ**: 397,924 records
-- **Khách hàng**: 4,373 customers
+   
+- **Giao dịch hợp lệ**: 354,321 records
+- **Khách hàng**: 3,920 customers
 - **Thời gian**: 374 days
 - **Giá trị giao dịch**: £0.001 - £38,970
 
