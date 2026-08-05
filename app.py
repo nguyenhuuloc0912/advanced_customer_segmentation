@@ -12,6 +12,8 @@ Expected files in data/processed/:
 
 import os
 import warnings
+import io
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -23,6 +25,49 @@ from scipy import stats as scipy_stats
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+
+# ─────────────────────────────────────────────
+# PDF EXPORT DEPENDENCIES (graceful fallback nếu chưa cài đặt)
+# ─────────────────────────────────────────────
+try:
+    import matplotlib
+    matplotlib.use("Agg")  # render không cần màn hình, an toàn khi chạy trên server
+    import matplotlib.pyplot as plt
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors as rl_colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import (
+        SimpleDocTemplate, Paragraph, Spacer, Image as RLImage,
+        Table, TableStyle, PageBreak, HRFlowable,
+    )
+
+    # DejaVu Sans được đóng gói sẵn bên trong matplotlib, hỗ trợ đầy đủ dấu tiếng Việt,
+    # nên không cần thêm file font riêng vào project.
+    _FONT_DIR = os.path.join(matplotlib.get_data_path(), "fonts", "ttf")
+    pdfmetrics.registerFont(TTFont("VNSans", os.path.join(_FONT_DIR, "DejaVuSans.ttf")))
+    pdfmetrics.registerFont(TTFont("VNSans-Bold", os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf")))
+    PDF_EXPORT_AVAILABLE = True
+except Exception as _pdf_import_error:
+    PDF_EXPORT_AVAILABLE = False
+    _PDF_IMPORT_ERROR_MSG = str(_pdf_import_error)
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.chart import BarChart, PieChart, Reference
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+    from openpyxl.worksheet.datavalidation import DataValidation
+    from openpyxl.formatting.rule import ColorScaleRule
+    from openpyxl.utils import get_column_letter
+
+    EXCEL_EXPORT_AVAILABLE = True
+except Exception as _xlsx_import_error:
+    EXCEL_EXPORT_AVAILABLE = False
+    _XLSX_IMPORT_ERROR_MSG = str(_xlsx_import_error)
 
 warnings.filterwarnings("ignore")
 
@@ -260,6 +305,18 @@ SEGMENT_PERSONAS_K3 = {
     0: {"name": "Nhóm giá trị cao", "color": "#f0b429", "desc": "Chi tiêu và mức giá mua cao"},
     1: {"name": "Nhóm mua nhiều", "color": "#2dd4a7", "desc": "Tổng chi tiêu và khối lượng mua lớn"},
     2: {"name": "Nhóm đa dạng", "color": "#a78bfa", "desc": "Khách hàng có danh mục mua sắm đa dạng"},
+}
+
+MARKETING_STRATEGY_K4 = {
+    0: "Ưu đãi kích hoạt lại (win-back), khảo sát nguyên nhân giảm tương tác, nhắc nhở qua email/SMS định kỳ.",
+    1: "Chương trình khách hàng VIP, quyền tiếp cận sớm sản phẩm mới, trải nghiệm cao cấp — hạn chế giảm giá trực tiếp để không làm giảm giá trị cảm nhận.",
+    2: "Chương trình tích điểm theo cấp bậc, ưu đãi theo số lượng mua, cân nhắc mô hình đăng ký (subscription) định kỳ.",
+    3: "Xây dựng hệ thống gợi ý sản phẩm (recommendation engine) và chương trình cross-selling cá nhân hóa dựa trên lịch sử mua đa dạng.",
+}
+MARKETING_STRATEGY_K3 = {
+    0: "Chương trình khách hàng thân thiết, ưu đãi theo giá trị đơn hàng, dịch vụ chăm sóc cá nhân hóa.",
+    1: "Chính sách chiết khấu theo số lượng, ưu tiên giao hàng nhanh cho đơn hàng lớn.",
+    2: "Gợi ý sản phẩm đa dạng, chương trình khuyến khích khám phá danh mục sản phẩm mới.",
 }
 
 DATA_DIR = "data/processed"
@@ -502,6 +559,517 @@ def transform_and_cluster(features_df, k_list=(3, 4), random_state=42):
 
 
 # ─────────────────────────────────────────────
+# PDF REPORT BUILDER
+# ─────────────────────────────────────────────
+def _fig_to_rlimage(fig, width_cm=14, height_cm=8):
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return RLImage(buf, width=width_cm * cm, height=height_cm * cm)
+
+
+def build_pdf_report(cleaned_df, features_df, clusters_k3, clusters_k4, data_label):
+    """Tạo báo cáo PDF tổng hợp: tổng quan dữ liệu, phân bố phân khúc (k=3, k=4),
+    đặc trưng hành vi từng nhóm (radar), và đề xuất chiến lược marketing.
+    Dùng font DejaVu (đóng gói sẵn trong matplotlib) để hỗ trợ đầy đủ tiếng Việt có dấu."""
+    font_regular, font_bold = "VNSans", "VNSans-Bold"
+
+    style_title = ParagraphStyle("title", fontName=font_bold, fontSize=24, leading=30,
+                                  textColor=rl_colors.HexColor("#1a1a2e"), alignment=TA_CENTER, spaceAfter=6)
+    style_subtitle = ParagraphStyle("subtitle", fontName=font_regular, fontSize=13, leading=18,
+                                     textColor=rl_colors.HexColor("#5f5e5a"), alignment=TA_CENTER, spaceAfter=4)
+    style_h2 = ParagraphStyle("h2", fontName=font_bold, fontSize=16, leading=20,
+                               textColor=rl_colors.HexColor("#1a1a2e"), spaceBefore=10, spaceAfter=8)
+    style_h3 = ParagraphStyle("h3", fontName=font_bold, fontSize=12.5, spaceBefore=6, spaceAfter=6)
+    style_seg_title = ParagraphStyle("seg_title", fontName=font_bold, fontSize=12, spaceBefore=10, spaceAfter=2)
+    style_body = ParagraphStyle("body", fontName=font_regular, fontSize=10.5, leading=15,
+                                 textColor=rl_colors.HexColor("#2c2c2a"), spaceAfter=6)
+    style_caption = ParagraphStyle("caption", fontName=font_regular, fontSize=8.5, leading=12,
+                                    textColor=rl_colors.HexColor("#888780"))
+
+    story = []
+
+    # ── Trang bìa ──
+    story.append(Spacer(1, 5 * cm))
+    story.append(Paragraph("BÁO CÁO PHÂN KHÚC KHÁCH HÀNG", style_title))
+    story.append(Paragraph("Tổng hợp kết quả phân tích dữ liệu bằng học máy không giám sát", style_subtitle))
+    story.append(Spacer(1, 1 * cm))
+    story.append(HRFlowable(width="40%", thickness=1, color=rl_colors.HexColor("#e8871e"), hAlign="CENTER"))
+    story.append(Spacer(1, 1 * cm))
+    story.append(Paragraph(f"Ngày xuất báo cáo: {datetime.now().strftime('%d/%m/%Y %H:%M')}", style_subtitle))
+    story.append(Paragraph(f"Nguồn dữ liệu: {data_label}", style_subtitle))
+    story.append(PageBreak())
+
+    # ── 1. Tổng quan dữ liệu ──
+    story.append(Paragraph("1. Tổng quan dữ liệu", style_h2))
+    n_customers = len(features_df)
+    n_transactions = len(cleaned_df) if cleaned_df is not None else None
+    total_revenue = features_df["Sum_TotalPrice"].sum() if "Sum_TotalPrice" in features_df.columns else None
+    avg_spend = features_df["Sum_TotalPrice"].mean() if "Sum_TotalPrice" in features_df.columns else None
+    avg_txn = features_df["Count_Invoice"].mean() if "Count_Invoice" in features_df.columns else None
+
+    kpi_rows = [["Chỉ số", "Giá trị"], ["Tổng số khách hàng", f"{n_customers:,}"]]
+    if n_transactions is not None:
+        kpi_rows.append(["Tổng số giao dịch", f"{n_transactions:,}"])
+    if total_revenue is not None:
+        kpi_rows.append(["Tổng doanh thu", f"£{total_revenue:,.0f}"])
+    if avg_spend is not None:
+        kpi_rows.append(["Chi tiêu trung bình / khách hàng", f"£{avg_spend:,.2f}"])
+    if avg_txn is not None:
+        kpi_rows.append(["Số giao dịch trung bình / khách hàng", f"{avg_txn:,.1f}"])
+
+    kpi_table = Table(kpi_rows, colWidths=[9 * cm, 6 * cm])
+    kpi_table.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (-1, -1), font_regular),
+        ("FONTNAME", (0, 0), (-1, 0), font_bold),
+        ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1e2761")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#d8d8d0")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f7f8fc")]),
+        ("FONTSIZE", (0, 0), (-1, -1), 10.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(kpi_table)
+    story.append(Spacer(1, 0.5 * cm))
+    story.append(Paragraph(
+        "Số liệu phản ánh dữ liệu hiện tại đang được sử dụng trong dashboard tại thời điểm xuất báo cáo.",
+        style_caption
+    ))
+    story.append(PageBreak())
+
+    # ── 2. Phân bố khách hàng theo phân khúc (k=4 và k=3) ──
+    story.append(Paragraph("2. Phân bố khách hàng theo phân khúc", style_h2))
+
+    for k, clusters_df, personas in [(4, clusters_k4, SEGMENT_PERSONAS_K4), (3, clusters_k3, SEGMENT_PERSONAS_K3)]:
+        if clusters_df is None or len(clusters_df) == 0:
+            continue
+        story.append(Paragraph(f"Phương án k = {k}", style_h3))
+        counts = clusters_df["Cluster"].value_counts().sort_index()
+        total = counts.sum()
+        labels = [personas.get(int(c), {}).get("name", f"Cụm {c}") for c in counts.index]
+        colors_list = [personas.get(int(c), {}).get("color", "#888888") for c in counts.index]
+
+        fig, ax = plt.subplots(figsize=(5.5, 4))
+        wedges, _ = ax.pie(counts.values, colors=colors_list, startangle=90,
+                            wedgeprops=dict(width=0.42, edgecolor="white"))
+        ax.legend(wedges, [f"{l} ({c / total:.1%})" for l, c in zip(labels, counts.values)],
+                  loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=9, frameon=False)
+        ax.set_title(f"Phân bố khách hàng — k={k}", fontsize=12)
+        story.append(_fig_to_rlimage(fig, width_cm=14, height_cm=8))
+
+        table_rows = [["Phân khúc", "Số khách hàng", "Tỷ lệ"]]
+        for label, cnt in zip(labels, counts.values):
+            table_rows.append([label, f"{cnt:,}", f"{cnt / total:.1%}"])
+        t = Table(table_rows, colWidths=[7 * cm, 4 * cm, 3 * cm])
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font_regular),
+            ("FONTNAME", (0, 0), (-1, 0), font_bold),
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1e2761")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), rl_colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, rl_colors.HexColor("#d8d8d0")),
+            ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ]))
+        story.append(t)
+        story.append(Spacer(1, 0.6 * cm))
+    story.append(PageBreak())
+
+    # ── 3. Đặc trưng hành vi từng phân khúc (radar, k=4) ──
+    story.append(Paragraph("3. Đặc trưng hành vi từng phân khúc (k = 4)", style_h2))
+    if clusters_k4 is not None and features_df is not None and len(clusters_k4) > 0:
+        merged4 = features_df.copy()
+        merged4.index = merged4.index.astype(str)
+        ck4 = clusters_k4.copy()
+        ck4["CustomerID"] = ck4["CustomerID"].astype(str)
+        merged4 = merged4.merge(ck4.set_index("CustomerID")["Cluster"], left_index=True, right_index=True, how="left")
+
+        radar_keys = [f for f in RADAR_FEATURES.keys() if f in merged4.columns]
+        cluster_means = merged4.groupby("Cluster")[radar_keys].mean()
+        gmin, gmax = cluster_means.min(), cluster_means.max()
+        norm = (cluster_means - gmin) / (gmax - gmin + 1e-9)
+        categories = [RADAR_FEATURES[f] for f in radar_keys]
+
+        angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+        angles += angles[:1]
+
+        fig, ax = plt.subplots(figsize=(6, 6), subplot_kw=dict(polar=True))
+        for cid, row in norm.iterrows():
+            vals = row.tolist() + row.tolist()[:1]
+            color = SEGMENT_PERSONAS_K4.get(int(cid), {}).get("color", "#888888")
+            name = SEGMENT_PERSONAS_K4.get(int(cid), {}).get("name", f"Cụm {cid}")
+            ax.plot(angles, vals, color=color, linewidth=1.8, label=name)
+            ax.fill(angles, vals, color=color, alpha=0.12)
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(categories, fontsize=8.5)
+        ax.set_yticklabels([])
+        ax.legend(loc="upper right", bbox_to_anchor=(1.4, 1.12), fontsize=8.5, frameon=False)
+        ax.set_title("So sánh đặc trưng trung bình từng phân khúc (đã chuẩn hóa)", fontsize=11, pad=20)
+        story.append(_fig_to_rlimage(fig, width_cm=13, height_cm=13))
+    else:
+        story.append(Paragraph("Không có đủ dữ liệu để dựng biểu đồ radar.", style_body))
+    story.append(PageBreak())
+
+    # ── 4. Đề xuất chiến lược marketing ──
+    story.append(Paragraph("4. Đề xuất chiến lược marketing theo phân khúc", style_h2))
+    for cid in sorted(SEGMENT_PERSONAS_K4.keys()):
+        persona = SEGMENT_PERSONAS_K4[cid]
+        story.append(Paragraph(
+            f'<font color="{persona["color"]}">●</font> <b>{persona["name"]}</b>', style_seg_title
+        ))
+        story.append(Paragraph(persona["desc"], style_body))
+        story.append(Paragraph(f'<b>Đề xuất:</b> {MARKETING_STRATEGY_K4.get(cid, "")}', style_body))
+
+    story.append(Spacer(1, 1 * cm))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=rl_colors.HexColor("#d8d8d0")))
+    story.append(Spacer(1, 0.3 * cm))
+    story.append(Paragraph(
+        f"Báo cáo được tạo tự động từ Dashboard Phân Khúc Khách Hàng — "
+        f"{datetime.now().strftime('%d/%m/%Y %H:%M')}. Dữ liệu: {n_customers:,} khách hàng ({data_label}).",
+        style_caption
+    ))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm,
+                             leftMargin=2 * cm, rightMargin=2 * cm)
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────
+# EXCEL DASHBOARD BUILDER (kiểu Power BI: dropdown lọc + biểu đồ + bảng có AutoFilter)
+# ─────────────────────────────────────────────
+HEADER_FILL = "1E2761"
+ACCENT_FILL = "E8871E"
+LIGHT_FILL = "F7F8FC"
+
+
+def _style_header_row(ws, row, n_cols, fill=HEADER_FILL):
+    for col in range(1, n_cols + 1):
+        cell = ws.cell(row=row, column=col)
+        cell.font = Font(name="Calibri", bold=True, color="FFFFFF", size=11)
+        cell.fill = PatternFill("solid", fgColor=fill)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+
+def build_excel_dashboard(cleaned_df, features_df, clusters_k3, clusters_k4, data_label):
+    """Tạo file Excel dạng dashboard: sheet Dashboard (KPI + dropdown lọc nhanh + biểu đồ),
+    sheet Dữ Liệu Khách Hàng (Excel Table có AutoFilter từng cột), sheet So Sánh Cụm (color scale).
+
+    Lưu ý: đây KHÔNG phải Slicer thật của Excel/Power BI (không có thư viện Python nào tạo được
+    Slicer từ đầu) — mà là ô dropdown (Data Validation) kết hợp công thức SUMIF/COUNTIF/AVERAGEIF,
+    cho hiệu quả lọc tương tự nhưng giao diện khác."""
+    df = features_df.copy()
+    df.index = df.index.astype(str)
+    df.index.name = "CustomerID"
+    df = df.reset_index()
+
+    for k, clusters_df in [(3, clusters_k3), (4, clusters_k4)]:
+        personas = SEGMENT_PERSONAS_K4 if k == 4 else SEGMENT_PERSONAS_K3
+        col_id, col_name = f"Cluster_k{k}", f"Cluster_k{k}_Ten"
+        if clusters_df is not None and len(clusters_df) > 0:
+            cdf = clusters_df.copy()
+            cdf["CustomerID"] = cdf["CustomerID"].astype(str)
+            cdf = cdf.rename(columns={"Cluster": col_id})
+            df = df.merge(cdf[["CustomerID", col_id]], on="CustomerID", how="left")
+            df[col_name] = df[col_id].map(
+                lambda c: personas.get(int(c), {}).get("name", f"Cụm {int(c)}") if pd.notna(c) else ""
+            )
+        else:
+            df[col_id] = None
+            df[col_name] = ""
+
+    wb = Workbook()
+
+    # ══ Sheet "Dữ Liệu Khách Hàng" ══
+    ws_data = wb.active
+    ws_data.title = "Dữ Liệu Khách Hàng"
+
+    display_cols = ["CustomerID"] + list(features_df.columns) + ["Cluster_k4_Ten", "Cluster_k3_Ten"]
+    header_labels = ["Mã khách hàng"] + [FEATURE_NAMES_VN.get(c, c) for c in features_df.columns] + \
+                     ["Phân khúc (k=4)", "Phân khúc (k=3)"]
+
+    ws_data.append(header_labels)
+    for _, row in df[display_cols].iterrows():
+        ws_data.append(list(row))
+
+    n_rows, n_cols = len(df) + 1, len(display_cols)
+    _style_header_row(ws_data, 1, n_cols)
+
+    for col_idx in range(1, n_cols + 1):
+        ws_data.column_dimensions[get_column_letter(col_idx)].width = 20 if col_idx > 1 else 16
+    ws_data.freeze_panes = "B2"
+
+    table_ref = f"A1:{get_column_letter(n_cols)}{n_rows}"
+    tbl = Table(displayName="TblData", ref=table_ref)
+    tbl.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
+    ws_data.add_table(tbl)
+
+    # ══ Sheet "Dashboard" ══
+    ws_dash = wb.create_sheet("Dashboard", 0)
+    ws_dash.sheet_view.showGridLines = False
+
+    ws_dash.merge_cells("B2:H2")
+    ws_dash["B2"] = "DASHBOARD PHÂN KHÚC KHÁCH HÀNG"
+    ws_dash["B2"].font = Font(name="Calibri", bold=True, size=20, color=HEADER_FILL)
+
+    ws_dash.merge_cells("B3:H3")
+    ws_dash["B3"] = f"Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M')} · Nguồn dữ liệu: {data_label}"
+    ws_dash["B3"].font = Font(name="Calibri", italic=True, size=10.5, color="6B7A99")
+
+    ws_dash["B5"] = "🔍 Bộ lọc nhanh — chọn phân khúc (k=4):"
+    ws_dash["B5"].font = Font(name="Calibri", bold=True, size=11)
+    persona_names = [SEGMENT_PERSONAS_K4[c]["name"] for c in sorted(SEGMENT_PERSONAS_K4.keys())]
+    ws_dash["E5"] = "Tất cả"
+    ws_dash["E5"].font = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
+    ws_dash["E5"].fill = PatternFill("solid", fgColor=ACCENT_FILL)
+    ws_dash["E5"].alignment = Alignment(horizontal="center")
+    dv_list = '"' + ",".join(["Tất cả"] + persona_names) + '"'
+    dv = DataValidation(type="list", formula1=dv_list, allow_blank=False)
+    ws_dash.add_data_validation(dv)
+    dv.add(ws_dash["E5"])
+
+    kpi_defs = [
+        ("Số khách hàng",
+         '=IF($E$5="Tất cả",COUNTA(TblData[Mã khách hàng]),COUNTIF(TblData[Phân khúc (k=4)],$E$5))', "#,##0"),
+        ("Tổng chi tiêu (£)",
+         '=IF($E$5="Tất cả",SUM(TblData[Tổng chi tiêu]),SUMIF(TblData[Phân khúc (k=4)],$E$5,TblData[Tổng chi tiêu]))', "#,##0"),
+        ("Chi tiêu TB / khách (£)", "=C8/C7", "#,##0.00"),
+        ("Số lần mua TB / khách",
+         '=IF($E$5="Tất cả",AVERAGE(TblData[Số lần mua]),AVERAGEIF(TblData[Phân khúc (k=4)],$E$5,TblData[Số lần mua]))', "0.0"),
+        ("Số sản phẩm khác nhau TB",
+         '=IF($E$5="Tất cả",AVERAGE(TblData[Số sản phẩm khác nhau]),AVERAGEIF(TblData[Phân khúc (k=4)],$E$5,TblData[Số sản phẩm khác nhau]))', "0.0"),
+    ]
+    kpi_row = 7
+    for i, (label, formula, fmt) in enumerate(kpi_defs):
+        r = kpi_row + i
+        ws_dash[f"B{r}"] = label
+        ws_dash[f"B{r}"].font = Font(name="Calibri", size=10.5, color="4A4A48")
+        ws_dash[f"C{r}"] = formula
+        ws_dash[f"C{r}"].font = Font(name="Calibri", bold=True, size=13, color=HEADER_FILL)
+        ws_dash[f"C{r}"].number_format = fmt
+        ws_dash[f"B{r}"].fill = PatternFill("solid", fgColor=LIGHT_FILL)
+        ws_dash[f"C{r}"].fill = PatternFill("solid", fgColor=LIGHT_FILL)
+
+    # Bảng phân bố theo cụm (cố định, không phụ thuộc dropdown) — nguồn cho pie chart
+    dist_row = 14
+    ws_dash[f"B{dist_row}"] = "Phân bố khách hàng theo phân khúc (k=4)"
+    ws_dash[f"B{dist_row}"].font = Font(name="Calibri", bold=True, size=12)
+    header_r = dist_row + 1
+    ws_dash[f"B{header_r}"] = "Phân khúc"
+    ws_dash[f"C{header_r}"] = "Số khách hàng"
+    _style_header_row(ws_dash, header_r, 2)
+    ws_dash.cell(row=header_r, column=2).alignment = Alignment(horizontal="left")
+    for i, name in enumerate(persona_names):
+        r = header_r + 1 + i
+        ws_dash[f"B{r}"] = name
+        ws_dash[f"C{r}"] = f'=COUNTIF(TblData[Phân khúc (k=4)],B{r})'
+
+    # Bảng so sánh chỉ số theo cụm (cố định) — nguồn cho bar chart
+    comp_row = header_r + 1 + len(persona_names) + 2
+    ws_dash[f"B{comp_row}"] = "So sánh chỉ số trung bình theo phân khúc (k=4)"
+    ws_dash[f"B{comp_row}"].font = Font(name="Calibri", bold=True, size=12)
+    comp_header_r = comp_row + 1
+    ws_dash[f"B{comp_header_r}"] = "Phân khúc"
+    ws_dash[f"C{comp_header_r}"] = "Chi tiêu TB (£)"
+    ws_dash[f"D{comp_header_r}"] = "Số lần mua TB"
+    _style_header_row(ws_dash, comp_header_r, 3)
+    ws_dash.cell(row=comp_header_r, column=2).alignment = Alignment(horizontal="left")
+    for i, name in enumerate(persona_names):
+        r = comp_header_r + 1 + i
+        ws_dash[f"B{r}"] = name
+        ws_dash[f"C{r}"] = f'=AVERAGEIF(TblData[Phân khúc (k=4)],B{r},TblData[Tổng chi tiêu])'
+        ws_dash[f"D{r}"] = f'=AVERAGEIF(TblData[Phân khúc (k=4)],B{r},TblData[Số lần mua])'
+
+    for col in ["B", "C", "D", "E"]:
+        ws_dash.column_dimensions[col].width = 26
+
+    # Pie chart — phân bố theo cụm
+    pie = PieChart()
+    pie.title = "Phân bố khách hàng theo phân khúc"
+    data_ref = Reference(ws_dash, min_col=3, min_row=header_r, max_row=header_r + len(persona_names))
+    cats_ref = Reference(ws_dash, min_col=2, min_row=header_r + 1, max_row=header_r + len(persona_names))
+    pie.add_data(data_ref, titles_from_data=True)
+    pie.set_categories(cats_ref)
+    pie.height, pie.width = 9, 13
+    ws_dash.add_chart(pie, "F7")
+
+    # Bar chart — so sánh chỉ số theo cụm
+    bar = BarChart()
+    bar.type = "col"
+    bar.title = "So sánh chi tiêu & tần suất trung bình theo phân khúc"
+    bar.y_axis.title = None
+    data_ref2 = Reference(ws_dash, min_col=3, max_col=4, min_row=comp_header_r,
+                           max_row=comp_header_r + len(persona_names))
+    cats_ref2 = Reference(ws_dash, min_col=2, min_row=comp_header_r + 1, max_row=comp_header_r + len(persona_names))
+    bar.add_data(data_ref2, titles_from_data=True)
+    bar.set_categories(cats_ref2)
+    bar.height, bar.width = 9, 13
+    ws_dash.add_chart(bar, "F25")
+
+    # ══ Sheet "So Sánh Cụm" (16 đặc trưng, color scale) ══
+    ws_cmp = wb.create_sheet("So Sánh Cụm")
+    merged4 = features_df.copy()
+    merged4.index = merged4.index.astype(str)
+    if clusters_k4 is not None and len(clusters_k4) > 0:
+        ck4 = clusters_k4.copy()
+        ck4["CustomerID"] = ck4["CustomerID"].astype(str)
+        merged4 = merged4.merge(ck4.set_index("CustomerID")["Cluster"], left_index=True, right_index=True, how="left")
+        cluster_avg = merged4.groupby("Cluster")[list(features_df.columns)].mean()
+        cluster_avg.index = [SEGMENT_PERSONAS_K4.get(int(c), {}).get("name", f"Cụm {c}") for c in cluster_avg.index]
+
+        ws_cmp["A1"] = "Chỉ số"
+        for j, cname in enumerate(cluster_avg.index):
+            ws_cmp.cell(row=1, column=2 + j, value=cname)
+        for i, feat in enumerate(features_df.columns):
+            ws_cmp.cell(row=2 + i, column=1, value=FEATURE_NAMES_VN.get(feat, feat))
+            for j, cname in enumerate(cluster_avg.index):
+                ws_cmp.cell(row=2 + i, column=2 + j, value=round(float(cluster_avg.loc[cname, feat]), 2))
+
+        n_feat, n_clust = len(features_df.columns), len(cluster_avg.index)
+        _style_header_row(ws_cmp, 1, 1 + n_clust)
+        ws_cmp.column_dimensions["A"].width = 28
+        for j in range(n_clust):
+            ws_cmp.column_dimensions[get_column_letter(2 + j)].width = 20
+
+        for i in range(n_feat):
+            r = 2 + i
+            rule = ColorScaleRule(
+                start_type="min", start_color="F8696B",
+                mid_type="percentile", mid_value=50, mid_color="FFEB84",
+                end_type="max", end_color="63BE7B",
+            )
+            ws_cmp.conditional_formatting.add(
+                f"B{r}:{get_column_letter(1 + n_clust)}{r}", rule
+            )
+    else:
+        ws_cmp["A1"] = "Không có dữ liệu cụm k=4 để so sánh."
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────
+# DASHBOARD IMAGE BUILDER (PNG/JPEG — ghép nhiều widget trên 1 canvas)
+# ─────────────────────────────────────────────
+def build_dashboard_image(cleaned_df, features_df, clusters_k3, clusters_k4, data_label, img_format="png"):
+    """Ghép các 'widget' (KPI card, pie chart, bar chart, radar chart) thành MỘT ảnh dashboard
+    duy nhất bằng matplotlib GridSpec, xuất PNG hoặc JPEG — không cần chụp màn hình trình duyệt."""
+    from matplotlib import gridspec
+    from matplotlib.patches import FancyBboxPatch
+
+    n_customers = len(features_df)
+    n_transactions = len(cleaned_df) if cleaned_df is not None else None
+    total_revenue = features_df["Sum_TotalPrice"].sum() if "Sum_TotalPrice" in features_df.columns else None
+    avg_spend = features_df["Sum_TotalPrice"].mean() if "Sum_TotalPrice" in features_df.columns else None
+    avg_txn = features_df["Count_Invoice"].mean() if "Count_Invoice" in features_df.columns else None
+
+    kpis = [("Khách hàng", f"{n_customers:,}")]
+    if n_transactions is not None:
+        kpis.append(("Giao dịch", f"{n_transactions:,}"))
+    if total_revenue is not None:
+        kpis.append(("Tổng doanh thu", f"£{total_revenue:,.0f}"))
+    if avg_spend is not None:
+        kpis.append(("Chi tiêu TB/khách", f"£{avg_spend:,.0f}"))
+    if avg_txn is not None:
+        kpis.append(("Giao dịch TB/khách", f"{avg_txn:,.1f}"))
+    n_kpi = max(len(kpis), 1)
+
+    NAVY, MUTED, BG = "#1E2761", "#6B7A99", "#F7F8FC"
+
+    fig = plt.figure(figsize=(16, 11), dpi=160)
+    fig.patch.set_facecolor(BG)
+    gs = gridspec.GridSpec(
+        4, 4, figure=fig, height_ratios=[0.5, 0.8, 2.3, 2.6],
+        hspace=0.6, wspace=0.35, left=0.04, right=0.97, top=0.95, bottom=0.04,
+    )
+
+    # ── Header ──
+    ax_h = fig.add_subplot(gs[0, :])
+    ax_h.axis("off")
+    ax_h.text(0, 0.75, "DASHBOARD PHÂN KHÚC KHÁCH HÀNG", fontsize=23, fontweight="bold", color=NAVY, va="top")
+    ax_h.text(0, 0.15, f"Ngày xuất: {datetime.now().strftime('%d/%m/%Y %H:%M')}  ·  Nguồn dữ liệu: {data_label}",
+              fontsize=11.5, color=MUTED, va="top")
+
+    # ── KPI cards ──
+    gs_kpi = gridspec.GridSpecFromSubplotSpec(1, n_kpi, subplot_spec=gs[1, :], wspace=0.25)
+    for i, (label, value) in enumerate(kpis):
+        ax = fig.add_subplot(gs_kpi[0, i])
+        ax.axis("off")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.add_patch(FancyBboxPatch(
+            (0.02, 0.05), 0.96, 0.9, boxstyle="round,pad=0.02,rounding_size=0.06",
+            transform=ax.transAxes, facecolor="white", edgecolor="#E2E6F2", linewidth=1.2,
+        ))
+        ax.text(0.5, 0.6, value, fontsize=21, fontweight="bold", color=NAVY, ha="center", va="center", transform=ax.transAxes)
+        ax.text(0.5, 0.24, label, fontsize=11.5, color=MUTED, ha="center", va="center", transform=ax.transAxes)
+
+    # ── Pie chart phân bố k=4 (trái) & Bar chart so sánh (phải) ──
+    if clusters_k4 is not None and len(clusters_k4) > 0:
+        counts = clusters_k4["Cluster"].value_counts().sort_index()
+        total = counts.sum()
+        labels = [SEGMENT_PERSONAS_K4.get(int(c), {}).get("name", f"Cụm {c}") for c in counts.index]
+        colors_list = [SEGMENT_PERSONAS_K4.get(int(c), {}).get("color", "#888888") for c in counts.index]
+
+        ax_pie = fig.add_subplot(gs[2, 0:2])
+        wedges, _ = ax_pie.pie(counts.values, colors=colors_list, startangle=90,
+                                wedgeprops=dict(width=0.42, edgecolor="white"))
+        ax_pie.legend(wedges, [f"{l} ({c/total:.1%})" for l, c in zip(labels, counts.values)],
+                      loc="center left", bbox_to_anchor=(1.0, 0.5), fontsize=9.5, frameon=False)
+        ax_pie.set_title("Phân bố khách hàng theo phân khúc (k=4)", fontsize=13, color=NAVY, pad=12)
+
+        ax_bar = fig.add_subplot(gs[2, 2:4])
+        merged4 = features_df.copy()
+        merged4.index = merged4.index.astype(str)
+        ck4 = clusters_k4.copy()
+        ck4["CustomerID"] = ck4["CustomerID"].astype(str)
+        merged4 = merged4.merge(ck4.set_index("CustomerID")["Cluster"], left_index=True, right_index=True, how="left")
+        avg_spend_c = merged4.groupby("Cluster")["Sum_TotalPrice"].mean() if "Sum_TotalPrice" in merged4.columns else None
+        if avg_spend_c is not None:
+            bar_labels = [SEGMENT_PERSONAS_K4.get(int(c), {}).get("name", f"Cụm {c}") for c in avg_spend_c.index]
+            bar_colors = [SEGMENT_PERSONAS_K4.get(int(c), {}).get("color", "#888888") for c in avg_spend_c.index]
+            ax_bar.bar(bar_labels, avg_spend_c.values, color=bar_colors)
+            ax_bar.set_title("Chi tiêu trung bình theo phân khúc (£)", fontsize=13, color=NAVY, pad=12)
+            ax_bar.tick_params(axis="x", labelrotation=12, labelsize=9)
+            ax_bar.spines[["top", "right"]].set_visible(False)
+
+    # ── Radar chart đặc trưng (dưới, căn giữa) ──
+    if clusters_k4 is not None and len(clusters_k4) > 0:
+        radar_keys = [f for f in RADAR_FEATURES.keys() if f in merged4.columns]
+        cluster_means = merged4.groupby("Cluster")[radar_keys].mean()
+        gmin, gmax = cluster_means.min(), cluster_means.max()
+        norm = (cluster_means - gmin) / (gmax - gmin + 1e-9)
+        categories = [RADAR_FEATURES[f] for f in radar_keys]
+        angles = np.linspace(0, 2 * np.pi, len(categories), endpoint=False).tolist()
+        angles += angles[:1]
+
+        ax_radar = fig.add_subplot(gs[3, 1:3], projection="polar")
+        for cid, row in norm.iterrows():
+            vals = row.tolist() + row.tolist()[:1]
+            color = SEGMENT_PERSONAS_K4.get(int(cid), {}).get("color", "#888888")
+            name = SEGMENT_PERSONAS_K4.get(int(cid), {}).get("name", f"Cụm {cid}")
+            ax_radar.plot(angles, vals, color=color, linewidth=1.8, label=name)
+            ax_radar.fill(angles, vals, color=color, alpha=0.12)
+        ax_radar.set_xticks(angles[:-1])
+        ax_radar.set_xticklabels(categories, fontsize=9)
+        ax_radar.set_yticklabels([])
+        ax_radar.legend(loc="upper right", bbox_to_anchor=(1.45, 1.12), fontsize=9.5, frameon=False)
+        ax_radar.set_title("So sánh đặc trưng trung bình từng phân khúc (đã chuẩn hóa)", fontsize=13, color=NAVY, pad=22)
+
+    buf = io.BytesIO()
+    save_format = "jpeg" if img_format.lower() in ("jpg", "jpeg") else "png"
+    fig.savefig(buf, format=save_format, dpi=160, facecolor=fig.get_facecolor())
+    plt.close(fig)
+    buf.seek(0)
+    return buf.getvalue()
+
+
+# ─────────────────────────────────────────────
 # PLOTLY THEME
 # ─────────────────────────────────────────────
 PLOTLY_LAYOUT = dict(
@@ -542,7 +1110,7 @@ with st.sidebar:
     st.markdown("<div class='section-header'>Navigation</div>", unsafe_allow_html=True)
     page = st.radio(
         "Chọn trang",
-        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "⚖️ So Sánh K=3 vs K=4", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng", "🧪 Mô Phỏng Khách Hàng", "📤 Cập Nhật Dữ Liệu Mới"],
+        ["📊 Tổng Quan", "🔍 Khám Phá Phân Khúc", "⚖️ So Sánh K=3 vs K=4", "📈 Phân Tích RFM", "🧭 Không Gian PCA", "🏆 Xếp Hạng Khách Hàng", "👤 Tra Cứu Khách Hàng", "🧪 Mô Phỏng Khách Hàng", "📤 Cập Nhật Dữ Liệu Mới", "📄 Xuất Báo Cáo Tổng Hợp"],
         label_visibility="collapsed",
     )
     st.markdown("---")
@@ -1784,4 +2352,176 @@ elif page == "📤 Cập Nhật Dữ Liệu Mới":
                 )
 
     st.markdown("---")
-    
+    st.caption(
+        "⚠️ Lưu ý: việc tính lại sẽ **huấn luyện lại từ đầu** Box-Cox, StandardScaler, PCA và K-Means trên toàn bộ "
+        "dữ liệu đã gộp (không phải chỉ dự đoán nhãn cho khách hàng mới bằng mô hình cũ). Vì vậy tâm cụm, ranh giới "
+        "phân khúc, và thậm chí thứ tự đánh số cụm (0/1/2/3) có thể thay đổi nhẹ so với kết quả gốc trong luận văn — "
+        "đây là hành vi đúng theo thiết kế khi \"tính lại\" trên dữ liệu lớn hơn, không phải lỗi.\n\n"
+        "Dữ liệu đã gộp được lưu vào các file riêng `*_merged.csv` trong `data/processed/` — "
+        "**không ghi đè** lên các file gốc (`cleaned_uk_data.csv`, `customer_features.csv`...), nên bạn luôn có thể "
+        "quay lại baseline gốc bằng nút \"Khôi phục dữ liệu gốc\". Vì được lưu trên đĩa, dữ liệu đã gộp sẽ **không mất** "
+        "khi tải lại trang (F5) — chỉ mất khi bạn bấm \"Xóa hẳn dữ liệu đã lưu trên đĩa\", hoặc khi deploy trên các nền "
+        "tảng có ổ đĩa tạm thời (ephemeral filesystem) như Streamlit Community Cloud, nơi dữ liệu có thể mất sau khi app khởi động lại."
+    )
+
+
+# ─────────────────────────────────────────────
+# ══ PAGE: XUẤT BÁO CÁO TỔNG HỢP ══
+# ─────────────────────────────────────────────
+elif page == "📄 Xuất Báo Cáo Tổng Hợp":
+    st.markdown("# 📄 Xuất Báo Cáo Tổng Hợp")
+    render_page_hero(
+        "Report Export",
+        "Xuất báo cáo/dashboard tổng hợp để trình bày hoặc phân tích thêm",
+        "Chọn định dạng phù hợp: PDF để trình bày hoặc gửi cho ban lãnh đạo, Excel dạng dashboard có "
+        "bộ lọc nhanh và biểu đồ để tự phân tích sâu hơn, hoặc ảnh PNG/JPEG để dán nhanh vào slide/tài liệu "
+        "— dựa trên dữ liệu hiện tại của dashboard.",
+        ["PDF Report", "Excel Dashboard", "Ảnh PNG/JPEG"],
+    )
+
+    tab_pdf, tab_excel, tab_image = st.tabs(["📄 PDF Report", "📊 Excel Dashboard", "🖼️ Ảnh Dashboard"])
+    data_label = "dữ liệu đã gộp" if st.session_state.get("recomputed") else "dữ liệu gốc"
+
+    with tab_pdf:
+        if not PDF_EXPORT_AVAILABLE:
+            st.error(
+                "⚠️ Thiếu thư viện để xuất PDF. Hãy cài đặt thêm bằng lệnh:\n\n"
+                "`pip install matplotlib reportlab`\n\n"
+                f"Chi tiết lỗi: `{_PDF_IMPORT_ERROR_MSG}`"
+            )
+        else:
+            st.info(
+                f"Báo cáo sẽ được tạo từ **{data_label}** hiện đang hiển thị trên dashboard "
+                f"({len(features_df):,} khách hàng)."
+            )
+            st.caption(
+                "Gồm: tổng quan dữ liệu, phân bố khách hàng theo phân khúc (k=3, k=4), radar chart đặc trưng "
+                "hành vi từng nhóm, và đề xuất chiến lược marketing."
+            )
+
+            if st.button("🖨️ Tạo Báo Cáo PDF", type="primary"):
+                with st.spinner("Đang tạo báo cáo PDF — có thể mất vài giây..."):
+                    try:
+                        pdf_bytes = build_pdf_report(
+                            cleaned_df, features_df, data["clusters_k3"], data["clusters_k4"], data_label,
+                        )
+                        st.session_state["pdf_report_bytes"] = pdf_bytes
+                        st.success("✅ Đã tạo báo cáo thành công! Bấm nút bên dưới để tải xuống.")
+                    except Exception as e:
+                        st.error(f"❌ Có lỗi khi tạo báo cáo: {e}")
+
+            if st.session_state.get("pdf_report_bytes"):
+                st.download_button(
+                    "⬇️ Tải Báo Cáo PDF",
+                    data=st.session_state["pdf_report_bytes"],
+                    file_name=f"bao_cao_phan_khuc_khach_hang_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+                    mime="application/pdf",
+                    type="primary",
+                )
+
+            st.caption(
+                "💡 Dùng font DejaVu Sans (đóng gói sẵn trong matplotlib) nên hiển thị đầy đủ dấu tiếng Việt, "
+                "không cần cài thêm font riêng."
+            )
+
+    with tab_excel:
+        if not EXCEL_EXPORT_AVAILABLE:
+            st.error(
+                "⚠️ Thiếu thư viện để xuất Excel. Hãy cài đặt thêm bằng lệnh:\n\n"
+                "`pip install openpyxl`\n\n"
+                f"Chi tiết lỗi: `{_XLSX_IMPORT_ERROR_MSG}`"
+            )
+        else:
+            st.info(
+                f"File Excel sẽ được tạo từ **{data_label}** hiện đang hiển thị trên dashboard "
+                f"({len(features_df):,} khách hàng)."
+            )
+            st.caption(
+                "Gồm 3 sheet: **Dashboard** (KPI + ô lọc nhanh theo phân khúc + biểu đồ), "
+                "**Dữ Liệu Khách Hàng** (bảng đầy đủ có bộ lọc từng cột — AutoFilter), "
+                "và **So Sánh Cụm** (bảng 16 đặc trưng, tô màu theo giá trị)."
+            )
+            st.warning(
+                "⚠️ Lưu ý: ô lọc trên sheet Dashboard là **Data Validation dropdown kết hợp công thức** "
+                "(SUMIF/COUNTIF/AVERAGEIF), không phải Slicer gốc của Excel/Power BI — hiệu quả lọc số liệu "
+                "tương tự, nhưng không có giao diện nút bấm dạng \"chip\" như Slicer thật.",
+                icon="ℹ️",
+            )
+
+            if st.button("📊 Tạo Excel Dashboard", type="primary"):
+                with st.spinner("Đang tạo file Excel — có thể mất vài giây..."):
+                    try:
+                        xlsx_bytes = build_excel_dashboard(
+                            cleaned_df, features_df, data["clusters_k3"], data["clusters_k4"], data_label,
+                        )
+                        st.session_state["xlsx_report_bytes"] = xlsx_bytes
+                        st.success("✅ Đã tạo file Excel thành công! Bấm nút bên dưới để tải xuống.")
+                    except Exception as e:
+                        st.error(f"❌ Có lỗi khi tạo file Excel: {e}")
+
+            if st.session_state.get("xlsx_report_bytes"):
+                st.download_button(
+                    "⬇️ Tải Excel Dashboard",
+                    data=st.session_state["xlsx_report_bytes"],
+                    file_name=f"dashboard_phan_khuc_khach_hang_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="primary",
+                )
+
+    with tab_image:
+        if not PDF_EXPORT_AVAILABLE:  # dùng chung matplotlib với phần PDF
+            st.error(
+                "⚠️ Thiếu thư viện matplotlib để xuất ảnh. Hãy cài đặt bằng lệnh:\n\n"
+                "`pip install matplotlib`\n\n"
+                f"Chi tiết lỗi: `{_PDF_IMPORT_ERROR_MSG}`"
+            )
+        else:
+            st.info(
+                f"Ảnh dashboard sẽ được tạo từ **{data_label}** hiện đang hiển thị trên dashboard "
+                f"({len(features_df):,} khách hàng)."
+            )
+            st.caption(
+                "Ghép các \"widget\": thẻ chỉ số KPI, biểu đồ tròn phân bố phân khúc, biểu đồ cột so sánh "
+                "chi tiêu, và radar chart đặc trưng hành vi — thành **một ảnh duy nhất**, phù hợp để dán vào "
+                "slide, tài liệu, hoặc chia sẻ nhanh qua chat."
+            )
+
+            img_format = st.radio("Định dạng ảnh", ["PNG (nét hơn, khuyến nghị)", "JPEG (nhẹ hơn)"],
+                                   horizontal=True, label_visibility="collapsed")
+            fmt_code = "png" if img_format.startswith("PNG") else "jpeg"
+
+            if st.button("🖼️ Tạo Ảnh Dashboard", type="primary"):
+                with st.spinner("Đang dựng ảnh dashboard — có thể mất vài giây..."):
+                    try:
+                        img_bytes = build_dashboard_image(
+                            cleaned_df, features_df, data["clusters_k3"], data["clusters_k4"],
+                            data_label, img_format=fmt_code,
+                        )
+                        st.session_state["dashboard_img_bytes"] = img_bytes
+                        st.session_state["dashboard_img_fmt"] = fmt_code
+                        st.success("✅ Đã tạo ảnh thành công!")
+                    except Exception as e:
+                        st.error(f"❌ Có lỗi khi tạo ảnh: {e}")
+
+            if st.session_state.get("dashboard_img_bytes"):
+                try:
+                    st.image(st.session_state["dashboard_img_bytes"], use_container_width=True)
+                except TypeError:
+                    # Streamlit phiên bản cũ hơn chưa hỗ trợ use_container_width cho st.image,
+                    # chỉ hỗ trợ use_column_width (tên tham số cũ).
+                    st.image(st.session_state["dashboard_img_bytes"], use_column_width=True)
+                ext = st.session_state.get("dashboard_img_fmt", "png")
+                mime = "image/png" if ext == "png" else "image/jpeg"
+                st.download_button(
+                    f"⬇️ Tải Ảnh Dashboard (.{ext})",
+                    data=st.session_state["dashboard_img_bytes"],
+                    file_name=f"dashboard_phan_khuc_khach_hang_{datetime.now().strftime('%Y%m%d_%H%M')}.{ext}",
+                    mime=mime,
+                    type="primary",
+                )
+
+    st.markdown("---")
+    st.caption(
+        "Nội dung xuất luôn phản ánh đúng dữ liệu đang hiển thị trên dashboard tại thời điểm bấm nút tạo — "
+        "nếu vừa gộp dữ liệu mới ở trang trước, hãy tạo lại để cập nhật số liệu mới nhất."
+    )
