@@ -46,24 +46,52 @@ Phân tích dữ liệu giao dịch của khách hàng để:
 
 ## Bắt đầu nhanh
 
-1. **Cài đặt dependencies:**
+1. **Tạo và kích hoạt môi trường ảo (virtual environment):**
+
+   **Trên Windows (Command Prompt / PowerShell):**
+
+   ```bash
+   python -m venv venv
+   venv\Scripts\activate
+   ```
+
+   **Trên macOS (Terminal):**
+
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+   > Sau khi kích hoạt thành công, bạn sẽ thấy `(venv)` xuất hiện ở đầu dòng lệnh. Để thoát môi trường ảo, chạy lệnh `deactivate`.
+
+2. **Cài đặt dependencies:**
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. **Chạy notebooks theo thứ tự:**
+3. **Chạy notebooks theo thứ tự:**
    - `01_cleaning_and_eda.ipynb` — Làm sạch và khám phá dữ liệu
    - `02_feature_engineering.ipynb` — Tạo 16 features + RFM tham chiếu
    - `03_modeling.ipynb` — PCA, so sánh thuật toán phân cụm, K-means, diễn giải SHAP
 
-3. **Chạy Streamlit để xem dashboard:**
+4. **Chạy Streamlit để xem dashboard:**
 
 ```bash
 streamlit run app.py
 ```
 
    Trong dashboard, có thể tải lên dữ liệu giao dịch mới ở trang **"Cập Nhật Dữ Liệu Mới"** để gộp và tính lại toàn bộ mô hình, hoặc xuất kết quả ở trang **"Xuất Báo Cáo Tổng Hợp"** (PDF / Excel / ảnh PNG-JPEG).
+
+## Demo trực tuyến
+
+Dashboard đã được triển khai công khai tại: **[locnguyen0912.streamlit.app](https://locnguyen0912.streamlit.app)**
+
+> **Lưu ý:** Vì sử dụng gói miễn phí của Streamlit Community Cloud, ứng dụng sẽ tự động "ngủ" (sleep) sau một thời gian không có người truy cập. Khi đó, trang sẽ hiển thị thông báo:
+>
+> *"This app has gone to sleep due to inactivity. Would you like to wake it back up?"*
+>
+> Chỉ cần nhấn nút **"Yes, get this app back up!"** và chờ khoảng 30 giây để ứng dụng khởi động lại bình thường.
 
 ## Công nghệ sử dụng
 
