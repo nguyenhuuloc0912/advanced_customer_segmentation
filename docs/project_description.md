@@ -449,8 +449,6 @@ Thay vì chỉ dùng K-means, dự án so sánh có hệ thống ba thuật toá
 
 **Kết luận lựa chọn**: K-means với k=4 vượt trội trên hai trong ba chỉ số (Silhouette, Davies-Bouldin), trong khi GMM và DBSCAN đều cho kết quả kém hơn rõ rệt — phù hợp với đặc điểm cấu trúc dữ liệu hành vi khách hàng sau PCA có xu hướng gần với giả định cụm hình cầu của K-means hơn là giả định mật độ (DBSCAN) hay hỗn hợp Gaussian chồng lấn (GMM). Giữa k=3 và k=4, mặc dù Calinski-Harabasz Index hơi nghiêng về k=3, việc phân tích sâu cấu trúc phân cụm cho thấy k=4 tách được nhóm Premium rộng của k=3 thành hai nhóm có ý nghĩa hành vi khác biệt rõ rệt (Premium thật và Giá trị thấp) — đây là căn cứ quyết định chọn k=4 làm phương án chính thức.
 
-> ⚠️ **Lưu ý quan trọng**: Trong một phiên bản tính toán trước đó của dự án, do lỗi kỹ thuật khiến nhãn cụm bị lẫn vào chính ma trận dùng để tính khoảng cách trong không gian PCA, Silhouette Score bị tính sai lệch lên tới khoảng 0,52 — một con số ảo, không phản ánh đúng chất lượng phân cụm thực tế. Sau khi phát hiện và sửa lỗi (tách riêng ma trận đặc trưng PCA khỏi các cột nhãn cụm), giá trị đúng và đáng tin cậy là **0,294** như trong bảng trên. Đây là một bài học quan trọng về việc luôn cần kiểm tra chéo pipeline tính toán, đặc biệt khi một chỉ số đánh giá "quá tốt" một cách bất thường.
-
 ### Implementation trong dự án
 
 #### Hyperparameter tuning:
